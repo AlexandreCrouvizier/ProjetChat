@@ -1,0 +1,84 @@
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ===== GLASSMORPHISM THEME VARIABLES ===== */
+:root {
+  --bg: #080818;
+  --glass: rgba(255, 255, 255, 0.04);
+  --glass-s: rgba(255, 255, 255, 0.07);
+  --glass-h: rgba(255, 255, 255, 0.10);
+  --glass-a: rgba(99, 102, 241, 0.12);
+  --border: rgba(255, 255, 255, 0.08);
+  --border-s: rgba(255, 255, 255, 0.12);
+  --border-f: rgba(139, 92, 246, 0.4);
+  --t1: #f0f0ff;
+  --t2: rgba(255, 255, 255, 0.55);
+  --t3: rgba(255, 255, 255, 0.25);
+  --acc: #8b5cf6;
+  --acc-g: rgba(139, 92, 246, 0.35);
+  --acc-s: rgba(139, 92, 246, 0.12);
+  --on: #34d399;
+  --on-g: rgba(52, 211, 153, 0.4);
+}
+
+/* Light theme */
+.light {
+  --bg: #e8e0f0;
+  --glass: rgba(255, 255, 255, 0.45);
+  --glass-s: rgba(255, 255, 255, 0.55);
+  --glass-h: rgba(255, 255, 255, 0.65);
+  --glass-a: rgba(99, 102, 241, 0.10);
+  --border: rgba(255, 255, 255, 0.5);
+  --border-s: rgba(255, 255, 255, 0.6);
+  --border-f: rgba(139, 92, 246, 0.35);
+  --t1: #1e1b4b;
+  --t2: rgba(30, 27, 75, 0.6);
+  --t3: rgba(30, 27, 75, 0.3);
+  --acc: #7c3aed;
+  --acc-g: rgba(124, 58, 237, 0.25);
+  --acc-s: rgba(124, 58, 237, 0.08);
+}
+
+/* ===== BASE ===== */
+body {
+  background: var(--bg);
+  color: var(--t1);
+  font-family: 'Sora', sans-serif;
+  transition: background 0.4s;
+}
+
+/* ===== GLASS UTILITIES ===== */
+@layer utilities {
+  .glass {
+    background: var(--glass);
+    backdrop-filter: blur(28px);
+    -webkit-backdrop-filter: blur(28px);
+    border: 1px solid var(--border);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+
+  .glass-strong {
+    background: var(--glass-s);
+    backdrop-filter: blur(40px);
+    -webkit-backdrop-filter: blur(40px);
+    border: 1px solid var(--border-s);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3),
+                inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  }
+}
+
+/* ===== SCROLLBAR ===== */
+::-webkit-scrollbar {
+  width: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+}

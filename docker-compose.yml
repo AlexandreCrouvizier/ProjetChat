@@ -1,0 +1,41 @@
+version: "3.8"
+
+services:
+  # PostgreSQL — Base de données principale
+  postgres:
+    image: postgres:16-alpine
+    container_name: chatapp-postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: chatapp
+      POSTGRES_USER: chatapp
+      POSTGRES_PASSWORD: chatapp_dev_2026
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U chatapp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis — Cache, sessions, présence, pub/sub
+  redis:
+    image: redis:7-alpine
+    container_name: chatapp-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+  redisdata:
