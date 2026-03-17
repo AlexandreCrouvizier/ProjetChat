@@ -7,10 +7,10 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "migrate": "knex migrate:latest --knexfile src/config/knexfile.ts",
-    "migrate:make": "knex migrate:make --knexfile src/config/knexfile.ts",
-    "migrate:rollback": "knex migrate:rollback --knexfile src/config/knexfile.ts",
-    "seed": "knex seed:run --knexfile src/config/knexfile.ts"
+    "migrate": "npx tsx run-knex.ts migrate:latest",
+    "migrate:rollback": "npx tsx run-knex.ts migrate:rollback",
+    "migrate:status": "npx tsx run-knex.ts migrate:status",
+    "seed": "npx tsx run-knex.ts seed:run"
   },
   "dependencies": {
     "express": "^4.21.0",
