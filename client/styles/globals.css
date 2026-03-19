@@ -52,43 +52,21 @@
   --inset: inset 0 1px 0 rgba(255, 255, 255, 0.8);
 }
 
-/* En light, les orbes sont plus subtiles */
 .light .orb-1 { background: radial-gradient(circle, rgba(139, 92, 246, 0.25) 0%, transparent 70%) !important; }
 .light .orb-2 { background: radial-gradient(circle, rgba(6, 182, 212, 0.2) 0%, transparent 70%) !important; }
 .light .orb-3 { background: radial-gradient(circle, rgba(236, 72, 153, 0.15) 0%, transparent 70%) !important; }
 .light .orb-4 { background: radial-gradient(circle, rgba(250, 204, 21, 0.12) 0%, transparent 70%) !important; }
-
-/* En light, les scrollbars sont différentes */
 .light ::-webkit-scrollbar-thumb { background: rgba(0, 0, 0, 0.1); }
 
-body {
-  background: var(--bg);
-  color: var(--t1);
-  font-family: 'Sora', sans-serif;
-  transition: background 0.4s, color 0.4s;
-}
+body { background: var(--bg); color: var(--t1); font-family: 'Sora', sans-serif; transition: background 0.4s, color 0.4s; }
 
-/* ===== GLASS UTILITIES ===== */
 @layer utilities {
-  .glass {
-    background: var(--glass);
-    backdrop-filter: blur(28px);
-    -webkit-backdrop-filter: blur(28px);
-    border: 1px solid var(--border);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), var(--inset);
-  }
-  .glass-strong {
-    background: var(--glass-s);
-    backdrop-filter: blur(40px);
-    -webkit-backdrop-filter: blur(40px);
-    border: 1px solid var(--border-s);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3), var(--inset);
-  }
+  .glass { background: var(--glass); backdrop-filter: blur(28px); -webkit-backdrop-filter: blur(28px); border: 1px solid var(--border); box-shadow: 0 8px 32px rgba(0,0,0,0.3), var(--inset); }
+  .glass-strong { background: var(--glass-s); backdrop-filter: blur(40px); -webkit-backdrop-filter: blur(40px); border: 1px solid var(--border-s); box-shadow: 0 8px 32px rgba(0,0,0,0.3), var(--inset); }
 }
 
-/* En light, shadow plus douce */
-.light .glass { box-shadow: 0 8px 32px rgba(100, 80, 160, 0.08), var(--inset); }
-.light .glass-strong { box-shadow: 0 8px 32px rgba(100, 80, 160, 0.1), var(--inset); }
+.light .glass { box-shadow: 0 8px 32px rgba(100,80,160,0.08), var(--inset); }
+.light .glass-strong { box-shadow: 0 8px 32px rgba(100,80,160,0.1), var(--inset); }
 
 /* ===== ORBS ===== */
 .orb-1 { position:absolute; width:600px; height:600px; border-radius:50%; background:radial-gradient(circle,rgba(139,92,246,0.4) 0%,transparent 70%); top:-150px; left:-150px; filter:blur(60px); animation:orbit1 22s ease-in-out infinite; }
@@ -102,22 +80,19 @@ body {
 @keyframes orbit4 { 0%,100%{transform:translate(0,0)} 50%{transform:translate(-40px,30px)} }
 
 /* ===== ANIMATIONS ===== */
-@keyframes bounce {
-  0%, 60%, 100% { transform: translateY(0); opacity: 0.3; }
-  30% { transform: translateY(-5px); opacity: 1; }
-}
-
-@keyframes slideUp {
-  from { opacity: 0; transform: translateY(20px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+@keyframes bounce { 0%,60%,100%{transform:translateY(0);opacity:.3} 30%{transform:translateY(-5px);opacity:1} }
+@keyframes slideUp { from{opacity:0;transform:translateY(20px)} to{opacity:1;transform:translateY(0)} }
+@keyframes fadeIn { from{opacity:0} to{opacity:1} }
+@keyframes scaleIn { from{opacity:0;transform:scale(0.95)} to{opacity:1;transform:scale(1)} }
 
 .animate-slideUp { animation: slideUp 0.4s ease-out; }
+.animate-fadeIn { animation: fadeIn 0.2s ease-out; }
+.animate-scaleIn { animation: scaleIn 0.3s ease-out; }
 
 /* ===== SCROLLBAR ===== */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.08); border-radius: 3px; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.08); border-radius: 3px; }
 
 /* ===== LEGAL PAGES ===== */
 article h1 { color: var(--t1); }

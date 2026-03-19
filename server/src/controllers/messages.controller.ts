@@ -1,44 +1,39 @@
 /**
- * controllers/messages.controller.ts — Endpoints REST pour les messages
- * 
- * Le temps réel passe par WebSocket (message:send).
- * Le REST sert principalement à récupérer l'historique.
+ * controllers/messages.controller.ts — FIXED: ajout endpoint thread
  */
-
 import type { Request, Response } from 'express';
 import { messageService } from '../services/message.service';
+import { messageRepository } from '../repositories/message.repository';
 import { AppError } from '../utils/errors';
 
 export const messagesController = {
 
-  /** GET /api/groups/:groupId/messages — Historique des messages */
+  /** GET /api/groups/:groupId/messages */
   async getGroupMessages(req: Request, res: Response): Promise<void> {
     try {
       const { groupId } = req.params;
       const { limit, before } = req.query;
-
       const messages = await messageService.getGroupMessages({
-        groupId,
-        limit: limit ? parseInt(limit as string, 10) : 50,
-        before: before as string,
-        userTier: req.user?.tier,
+        groupId, limit: limit ? parseInt(limit as string, 10) : 50,
+        before: before as string, currentUserId: req.user?.userId,
       });
-
-      // Déterminer s'il y a plus de messages (pour le "charger plus")
-      const total = await (await import('../repositories/message.repository')).messageRepository.countByGroup(groupId);
-      const hasMore = messages.length > 0 && total > messages.length;
-
-      res.json({
-        messages,
-        has_more: hasMore,
-      });
+      const total = await messageRepository.countByGroup(groupId);
+      res.json({ messages, has_more: messages.length > 0 && total > messages.length });
     } catch (error: any) {
-      if (error instanceof AppError) {
-        res.status(error.statusCode).json({ error: error.code, message: error.message });
-      } else {
-        console.error('❌ Erreur getGroupMessages:', error);
-        res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Erreur serveur' });
-      }
+      if (error instanceof AppError) res.status(error.statusCode).json({ error: error.code, message: error.message });
+      else { console.error('❌ getGroupMessages:', error); res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Erreur serveur' }); }
+    }
+  },
+
+  /** GET /api/groups/:groupId/messages/:messageId/thread — Réponses d'un thread */
+  async getThread(req: Request, res: Response): Promise<void> {
+    try {
+      const { messageId } = req.params;
+      const messages = await messageService.getThreadMessages(messageId, req.user?.userId);
+      res.json({ messages });
+    } catch (error: any) {
+      console.error('❌ getThread:', error);
+      res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Erreur serveur' });
     }
   },
 };

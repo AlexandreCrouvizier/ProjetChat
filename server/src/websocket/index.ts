@@ -1,131 +1,86 @@
 /**
- * websocket/index.ts — Configuration Socket.io
- * 
- * C'est ici que tout le temps réel se passe :
- *   1. Authentification WebSocket (vérifie le JWT à la connexion)
- *   2. Rejoindre les rooms des groupes de l'utilisateur
- *   3. Enregistrement des handlers (messages, typing, etc.)
- * 
- * Concept clé — Les "rooms" Socket.io :
- *   Chaque groupe est une room : "group:uuid"
- *   Chaque utilisateur a sa room perso : "user:uuid" (pour les notifs)
- *   Quand on envoie un message dans un groupe, on broadcast à la room du groupe
- *   → Tous les membres connectés reçoivent le message instantanément
+ * websocket/index.ts — FIXED: nettoyage présence correct au disconnect/logout
  */
-
 import { Server as SocketIOServer, Socket } from 'socket.io';
 import { verifyAccessToken, type JwtPayload } from '../utils/jwt';
 import { getIpFromSocket } from '../utils/ip';
 import { groupRepository } from '../repositories/group.repository';
+import { conversationRepository } from '../repositories/conversation.repository';
 import { userRepository } from '../repositories/user.repository';
 import { redis } from '../config/redis';
 import { registerMessageHandlers } from './message.handler';
 import { registerGroupHandlers } from './group.handler';
+import { registerReactionHandlers } from './reaction.handler';
+import { registerConversationHandlers } from './conversation.handler';
 
-// Étend le type Socket pour y attacher les données utilisateur
-// Comme req.user en Express, mais pour les WebSockets
 interface AuthenticatedSocket extends Socket {
   user: JwtPayload;
   userIp: string;
 }
 
 export function setupWebSocket(io: SocketIOServer): void {
-
-  // ===== MIDDLEWARE AUTH WEBSOCKET =====
-  // Exécuté AVANT chaque connexion. Si le token est invalide, la connexion est refusée.
   io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth?.token;
-
-      if (!token) {
-        return next(new Error('Token d\'authentification manquant'));
-      }
-
-      // Vérifie le JWT
+      if (!token) return next(new Error('Token manquant'));
       const payload = verifyAccessToken(token);
-
-      // Vérifie que l'utilisateur existe et n'est pas banni
       const user = await userRepository.findById(payload.userId);
-      if (!user) {
-        return next(new Error('Utilisateur introuvable'));
-      }
-      if (user.is_banned) {
-        return next(new Error('Compte suspendu'));
-      }
-
-      // Attache les données utilisateur au socket
+      if (!user) return next(new Error('Utilisateur introuvable'));
+      if (user.is_banned) return next(new Error('Compte suspendu'));
       (socket as AuthenticatedSocket).user = payload;
       (socket as AuthenticatedSocket).userIp = getIpFromSocket(socket);
-
       next();
-    } catch (error: any) {
-      next(new Error('Token invalide ou expiré'));
-    }
+    } catch { next(new Error('Token invalide ou expiré')); }
   });
 
-  // ===== CONNEXION =====
   io.on('connection', async (rawSocket) => {
     const socket = rawSocket as AuthenticatedSocket;
     const { userId, username, tier } = socket.user;
+    console.log(`⚡ [WS] ${username} connecté (${tier})`);
 
-    console.log(`⚡ [WS] ${username} connecté (${tier}) — socket: ${socket.id}`);
-
-    // 1. Rejoindre la room personnelle (pour les notifications ciblées)
+    // Room personnelle
     socket.join(`user:${userId}`);
 
-    // 2. Rejoindre les rooms de tous les groupes de l'utilisateur
+    // Rooms des groupes
     try {
       const groupIds = await groupRepository.getGroupIdsForUser(userId);
-      for (const groupId of groupIds) {
-        socket.join(`group:${groupId}`);
-      }
-      console.log(`   → ${groupIds.length} room(s) rejointe(s)`);
-    } catch (err) {
-      console.error('⚠️ Erreur chargement des rooms:', err);
-    }
+      for (const gid of groupIds) socket.join(`group:${gid}`);
+    } catch (err) { console.error('⚠️ rooms groupes:', err); }
 
-    // 3. Marquer comme "en ligne" dans Redis
-    await redis.hset('presence', userId, JSON.stringify({
-      socketId: socket.id,
-      username,
-      tier,
-      connectedAt: Date.now(),
-    }));
+    // Rooms des conversations privées
+    try {
+      const convIds = await conversationRepository.getConversationIdsForUser(userId);
+      for (const cid of convIds) socket.join(`conv:${cid}`);
+    } catch (err) { console.error('⚠️ rooms conversations:', err); }
 
-    // 4. Mettre à jour last_seen_at en BDD
-    await userRepository.update(userId, {
-      last_seen_at: new Date().toISOString(),
-      last_ip: socket.userIp,
-    } as any);
+    // ⭐ Présence : stocker avec le socketId pour gérer les multi-onglets
+    await redis.hset('presence', userId, JSON.stringify({ socketId: socket.id, username, tier, connectedAt: Date.now() }));
+    await userRepository.update(userId, { last_seen_at: new Date().toISOString(), last_ip: socket.userIp } as any);
+    socket.broadcast.emit('presence:update', { user_id: userId, status: 'online' });
 
-    // 5. Broadcast "online" aux autres utilisateurs
-    socket.broadcast.emit('presence:update', {
-      user_id: userId,
-      status: 'online',
-    });
-
-    // 6. Enregistrer les handlers d'événements
+    // Handlers
     registerMessageHandlers(io, socket);
     registerGroupHandlers(io, socket);
+    registerReactionHandlers(io, socket);
+    registerConversationHandlers(io, socket);
 
-    // 7. Déconnexion
+    // ⭐ Déconnexion — vérifier qu'il n'y a pas d'autre socket du même user
     socket.on('disconnect', async (reason) => {
       console.log(`👋 [WS] ${username} déconnecté (${reason})`);
 
-      // Retirer de la présence Redis
-      await redis.hdel('presence', userId);
+      // Vérifier si l'utilisateur a encore d'autres sockets connectés
+      const otherSockets = await io.in(`user:${userId}`).fetchSockets();
+      const hasOtherConnections = otherSockets.length > 0;
 
-      // Mettre à jour last_seen_at
-      await userRepository.update(userId, {
-        last_seen_at: new Date().toISOString(),
-      } as any);
-
-      // Broadcast "offline"
-      socket.broadcast.emit('presence:update', {
-        user_id: userId,
-        status: 'offline',
-        last_seen_at: new Date().toISOString(),
-      });
+      if (!hasOtherConnections) {
+        // Plus aucune connexion → marquer offline
+        await redis.hdel('presence', userId);
+        await userRepository.update(userId, { last_seen_at: new Date().toISOString() } as any);
+        socket.broadcast.emit('presence:update', { user_id: userId, status: 'offline', last_seen_at: new Date().toISOString() });
+        console.log(`   → ${username} est maintenant hors ligne`);
+      } else {
+        console.log(`   → ${username} a encore ${otherSockets.length} connexion(s) active(s)`);
+      }
     });
   });
 }
