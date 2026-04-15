@@ -10,11 +10,13 @@ import { messageRepository } from '../repositories/message.repository';
 import { groupRepository } from '../repositories/group.repository';
 import { reactionRepository } from '../repositories/reaction.repository';
 import { conversationRepository } from '../repositories/conversation.repository';
+import { userRepository } from '../repositories/user.repository';
 import { moderationService } from './moderation.service';
 import { checkRateLimit } from '../middleware/rateLimit.middleware';
 import { logAudit } from '../middleware/audit.middleware';
 import { BadRequestError, ForbiddenError, RateLimitError } from '../utils/errors';
 import { VALIDATION, TIER_LIMITS } from '../../../shared/constants';
+import { db } from '../config/database';
 
 /**
  * Formate un message brut (avec champs plats) en message structuré (avec author: {})
@@ -79,6 +81,36 @@ export const messageService = {
       if (group.type === 'private') {
         const isMember = await groupRepository.isMember(data.groupId, data.authorId);
         if (!isMember) throw new ForbiddenError('Non membre du salon privé');
+      }
+
+      // ⭐ Vérification mute dans le salon
+      const isMutedInGroup = await groupRepository.isMemberMuted(data.groupId, data.authorId);
+      if (isMutedInGroup) {
+        const err = new ForbiddenError('Vous êtes muté dans ce salon.');
+        (err as any).muteData = { reason: 'Muté dans ce salon', expires_at: null, duration: '' };
+        throw err;
+      }
+    }
+
+    // ⭐ Vérification mute global
+    const author = await userRepository.findById(data.authorId);
+    if (author?.is_muted) {
+      // Auto-démuter si expiré
+      if (author.mute_expires_at && new Date(author.mute_expires_at) < new Date()) {
+        await userRepository.update(data.authorId, { is_muted: false, mute_expires_at: null } as any);
+      } else {
+        // Récupérer la raison du dernier mute depuis moderation_actions
+        const lastMute = await db('moderation_actions')
+          .where({ target_user_id: data.authorId, action: 'mute' })
+          .orderBy('created_at', 'desc')
+          .first();
+        const err = new ForbiddenError('Vous êtes actuellement muté.');
+        (err as any).muteData = {
+          reason: lastMute?.reason || 'Muté par la modération',
+          expires_at: author.mute_expires_at || null,
+          duration: lastMute?.duration || '',
+        };
+        throw err;
       }
     }
 

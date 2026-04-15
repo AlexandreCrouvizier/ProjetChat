@@ -1,5 +1,5 @@
 /**
- * app.ts — Phase 2 étape 5 : ajout routes users
+ * app.ts — Phase 3.5 : ajout routes admin-auth (TOTP) + admin (dashboard)
  */
 import express from 'express';
 import cors from 'cors';
@@ -11,6 +11,8 @@ import authRoutes from './routes/auth.routes';
 import groupsRoutes from './routes/groups.routes';
 import conversationsRoutes from './routes/conversations.routes';
 import usersRoutes from './routes/users.routes';
+import moderationRoutes from './routes/moderation.routes';
+import adminRouter, { adminAuthRouter } from './routes/admin.routes';
 
 const app = express();
 app.use(helmet());
@@ -27,7 +29,10 @@ app.get('/api/health', (_req, res) => {
 app.use('/api/auth', authRoutes);
 app.use('/api/groups', groupsRoutes);
 app.use('/api/conversations', conversationsRoutes);
-app.use('/api/users', usersRoutes);  // ⭐ Nouveau
+app.use('/api/users', usersRoutes);
+app.use('/api/moderation', moderationRoutes);
+app.use('/api/admin-auth', adminAuthRouter);  // ⭐ TOTP setup/verify
+app.use('/api/admin', adminRouter);            // ⭐ Dashboard admin (post-TOTP)
 
 app.use((_req, res) => { res.status(404).json({ error: 'NOT_FOUND', message: 'Route introuvable' }); });
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

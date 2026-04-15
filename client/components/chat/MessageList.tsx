@@ -1,5 +1,8 @@
 /**
- * components/chat/MessageList.tsx — FIXED: avatar photo dans les messages
+ * components/chat/MessageList.tsx — Phase 3 : signaler + filtrage bloqués + messages masqués
+ *
+ * FIX: messages masqués (is_hidden) affichés grisés avec contenu remplacé
+ * FIX: onReport passé au ThreadView pour signaler des messages de thread
  */
 'use client';
 
@@ -16,10 +19,13 @@ interface MessageListProps {
   onLoadMore: () => void;
   onToggleReaction: (messageId: string, emoji: string) => void;
   onAvatarClick?: (userId: string) => void;
+  onReport?: (msg: ChatMessage) => void;
+  onMuteAlert?: (info: { duration: string; reason: string; expires_at?: string | null; admin_message?: string }) => void;
   currentUserId: string;
   currentUserTier: string;
   currentUsername?: string;
   groupId?: string | null;
+  blockedUserIds?: Set<string>;
 }
 
 function getAvatarColor(u: string): string {
@@ -38,27 +44,21 @@ function getBadge(tier: string, db?: string) {
 function formatTime(d: string) { return new Date(d).toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'}); }
 function formatTimeAgo(d: string) { const m=Math.floor((Date.now()-new Date(d).getTime())/60000); if(m<1)return 'à l\'instant'; if(m<60)return `il y a ${m}min`; const h=Math.floor(m/60); if(h<24)return `il y a ${h}h`; return `il y a ${Math.floor(h/24)}j`; }
 
-/** ⭐ Composant Avatar réutilisable — photo si dispo, initiale sinon */
 function Avatar({ username, avatarUrl, size = 'md', onClick }: { username: string; avatarUrl?: string | null; size?: 'md' | 'sm'; onClick?: () => void }) {
   const initial = username.charAt(0).toUpperCase();
   const color = getAvatarColor(username);
   const sizeClasses = size === 'md' ? 'w-10 h-10 rounded-xl text-base' : 'w-6 h-6 rounded-lg text-[9px]';
-
   if (avatarUrl) {
-    return (
-      <img src={avatarUrl} alt={username} onClick={onClick}
-        className={`${sizeClasses} object-cover shadow-[0_4px_14px_rgba(0,0,0,0.25)] flex-shrink-0 cursor-pointer hover:scale-105 transition-transform`} />
-    );
+    return <img src={avatarUrl} alt={username} onClick={onClick} className={`${sizeClasses} object-cover shadow-[0_4px_14px_rgba(0,0,0,0.25)] flex-shrink-0 cursor-pointer hover:scale-105 transition-transform`} />;
   }
   return (
-    <div onClick={onClick}
-      className={`${sizeClasses} bg-gradient-to-br ${color} flex items-center justify-center font-bold text-white shadow-[0_4px_14px_rgba(0,0,0,0.25)] flex-shrink-0 cursor-pointer hover:scale-105 transition-transform`}>
+    <div onClick={onClick} className={`${sizeClasses} bg-gradient-to-br ${color} flex items-center justify-center font-bold text-white shadow-[0_4px_14px_rgba(0,0,0,0.25)] flex-shrink-0 cursor-pointer hover:scale-105 transition-transform`}>
       {initial}
     </div>
   );
 }
 
-export function MessageList({ messages, isLoading, hasMore, onLoadMore, onToggleReaction, onAvatarClick, currentUserId, currentUserTier, currentUsername, groupId }: MessageListProps) {
+export function MessageList({ messages, isLoading, hasMore, onLoadMore, onToggleReaction, onAvatarClick, onReport, onMuteAlert, currentUserId, currentUserTier, currentUsername, groupId, blockedUserIds }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const prevCount = useRef(0);
@@ -93,6 +93,64 @@ export function MessageList({ messages, isLoading, hasMore, onLoadMore, onToggle
       )}
 
       {messages.map(msg => {
+        const isOwnMessage = msg.author?.id === currentUserId;
+        const authorId = msg.author?.id || '';
+        const isHidden = msg.is_hidden === true;
+
+        // ⭐ Masquer les messages des utilisateurs bloqués
+        if (blockedUserIds && blockedUserIds.has(authorId) && !isOwnMessage) {
+          return (
+            <div key={msg.id} className="flex gap-3 px-2.5 py-2 rounded-xl opacity-40">
+              <div className="w-10 h-10 rounded-xl bg-[var(--glass)] flex items-center justify-center text-[var(--t3)] text-sm flex-shrink-0">🚫</div>
+              <div className="flex-1 min-w-0 flex items-center">
+                <span className="text-[11px] text-[var(--t3)] italic">Message d&apos;un utilisateur bloqué</span>
+              </div>
+            </div>
+          );
+        }
+
+        // ⭐ MESSAGE MASQUÉ PAR LA MODÉRATION
+        if (isHidden) {
+          const isThreadOpen = openThreadId === msg.id;
+          return (
+            <div key={msg.id}>
+              <div className="flex gap-3 px-2.5 py-2 rounded-xl opacity-50">
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-[var(--t3)] text-lg flex-shrink-0"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  🗑️
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-baseline gap-2 mb-0.5">
+                    <span className="text-[13px] font-semibold text-[var(--t3)] italic">{msg.author?.username || 'Inconnu'}</span>
+                    <span className="text-[10px] text-[var(--t3)]">{formatTime(msg.created_at)}</span>
+                  </div>
+                  <div className="text-[12px] text-[var(--t3)] italic flex items-center gap-1.5">
+                    <span className="inline-block w-1 h-1 rounded-full bg-red-400/40" />
+                    Ce message a été supprimé par la modération.
+                  </div>
+
+                  {/* ⭐ Le thread reste accessible même si le message parent est masqué */}
+                  {(msg.thread_count > 0 || isThreadOpen) && (
+                    <button onClick={() => handleReply(msg.id)}
+                      className={`flex items-center gap-1.5 mt-1.5 text-[11px] cursor-pointer transition-colors rounded-md px-2 py-1 -ml-2
+                        ${isThreadOpen ? 'bg-[var(--acc-s)] text-[var(--acc)] font-semibold' : 'text-[var(--acc)] hover:bg-[var(--acc-s)]'}`}>
+                      <span>{isThreadOpen ? '▾' : '▸'}</span>
+                      <span className="font-semibold">💬 {msg.thread_count || 0} réponse{(msg.thread_count || 0) !== 1 ? 's' : ''}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {isThreadOpen && groupId && (
+                <ThreadView parentMessageId={msg.id} groupId={groupId} currentUserId={currentUserId}
+                  currentUsername={currentUsername} currentUserTier={currentUserTier}
+                  onClose={() => setOpenThreadId(null)} onReport={onReport} onMuteAlert={onMuteAlert} />
+              )}
+            </div>
+          );
+        }
+
+        // MESSAGE NORMAL
         const badge = getBadge(msg.author?.tier || '', msg.author?.donor_badge);
         const isGuest = msg.author?.tier === 'guest';
         const isThreadOpen = openThreadId === msg.id;
@@ -100,7 +158,6 @@ export function MessageList({ messages, isLoading, hasMore, onLoadMore, onToggle
         return (
           <div key={msg.id}>
             <div className={`flex gap-3 px-2.5 py-2 rounded-xl transition-colors group relative ${isThreadOpen ? 'bg-[rgba(139,92,246,0.04)] border-l-2 border-[var(--acc)]' : 'hover:bg-[rgba(255,255,255,0.02)]'}`}>
-              {/* ⭐ Avatar photo si dispo */}
               <Avatar
                 username={msg.author?.username || 'Inconnu'}
                 avatarUrl={msg.author?.avatar_url}
@@ -136,7 +193,13 @@ export function MessageList({ messages, isLoading, hasMore, onLoadMore, onToggle
                 <ReactionBar reactions={msg.reactions || []} onToggle={(emoji) => onToggleReaction(msg.id, emoji)} isGuest={currentUserTier === 'guest'} />
               </div>
 
+              {/* Boutons hover : signaler + thread */}
               <div className="absolute top-1 right-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-0.5">
+                {!isOwnMessage && onReport && (
+                  <button onClick={() => onReport(msg)}
+                    className="w-7 h-7 rounded-lg backdrop-blur-sm border bg-[var(--glass-s)] border-[var(--border)] text-[var(--t3)] hover:text-red-400 hover:border-red-400 flex items-center justify-center transition-all text-xs"
+                    title="Signaler ce message">🚩</button>
+                )}
                 <button onClick={() => handleReply(msg.id)}
                   className={`w-7 h-7 rounded-lg backdrop-blur-sm border flex items-center justify-center transition-all text-xs
                     ${isThreadOpen ? 'bg-[var(--acc)] border-[var(--acc)] text-white shadow-[0_0_10px_var(--acc-g)]' : 'bg-[var(--glass-s)] border-[var(--border)] text-[var(--t3)] hover:text-[var(--t1)] hover:border-[var(--acc)]'}`}
@@ -147,7 +210,9 @@ export function MessageList({ messages, isLoading, hasMore, onLoadMore, onToggle
             </div>
 
             {isThreadOpen && groupId && (
-              <ThreadView parentMessageId={msg.id} groupId={groupId} currentUserId={currentUserId} currentUsername={currentUsername} onClose={() => setOpenThreadId(null)} />
+              <ThreadView parentMessageId={msg.id} groupId={groupId} currentUserId={currentUserId}
+                currentUsername={currentUsername} currentUserTier={currentUserTier}
+                onClose={() => setOpenThreadId(null)} onReport={onReport} onMuteAlert={onMuteAlert} />
             )}
           </div>
         );

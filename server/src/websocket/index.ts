@@ -60,7 +60,7 @@ export function setupWebSocket(io: SocketIOServer): void {
 
     // Handlers
     registerMessageHandlers(io, socket);
-    registerGroupHandlers(io, socket);
+    registerGroupHandlers(io, socket, socket.user);
     registerReactionHandlers(io, socket);
     registerConversationHandlers(io, socket);
 

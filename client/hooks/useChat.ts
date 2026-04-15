@@ -21,6 +21,7 @@ export interface ChatMessage {
   conversation_id: string | null;
   type: string;
   is_pinned: boolean;
+  is_hidden: boolean;
   reply_to_id: string | null;
   reply_to: ReplyToData | null;
   parent_message_id: string | null;
@@ -82,6 +83,18 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
     const onMessageDeleted = (data: { message_id: string }) => {
       setMessages(prev => prev.filter(msg => msg.id !== data.message_id));
     };
+    // ⭐ Message masqué par la modération : passe en is_hidden=true sans disparaître
+    const onMessageHidden = (data: { message_id: string; parent_message_id: string | null }) => {
+      if (!data.parent_message_id) {
+        // Message racine → mettre à jour dans la liste principale
+        setMessages(prev => prev.map(msg =>
+          msg.id === data.message_id
+            ? { ...msg, is_hidden: true, content: 'Ce message a été supprimé par la modération.' }
+            : msg
+        ));
+      }
+      // Les replies de thread sont gérées par ThreadView via le même event
+    };
     const onReactionUpdate = (data: { message_id: string; reactions: Array<{ emoji: string; count: number; users: string[] }> }) => {
       setMessages(prev => prev.map(msg => {
         if (msg.id !== data.message_id) return msg;
@@ -96,6 +109,7 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
     socket.on('thread:count_update', onThreadCountUpdate);
     socket.on('message:edited', onMessageEdited);
     socket.on('message:deleted', onMessageDeleted);
+    socket.on('message:hidden', onMessageHidden);
     socket.on('reaction:update', onReactionUpdate);
     socket.on('typing:update', onTypingUpdate);
 
@@ -104,6 +118,7 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
       socket.off('thread:count_update', onThreadCountUpdate);
       socket.off('message:edited', onMessageEdited);
       socket.off('message:deleted', onMessageDeleted);
+      socket.off('message:hidden', onMessageHidden);
       socket.off('reaction:update', onReactionUpdate);
       socket.off('typing:update', onTypingUpdate);
     };
@@ -124,7 +139,16 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
         // Pas de reply_to_id ni parent_message_id ici
       }, (response: any) => {
         if (response.success) resolve(response.message);
-        else reject(new Error(response.error));
+        else {
+          // ⭐ Attacher les données enrichies mute à l'erreur pour le caller
+          const err: any = new Error(response.error);
+          if (response.muted) {
+            err.muted = true;
+            err.expires_at = response.expires_at;
+            err.reason = response.reason;
+          }
+          reject(err);
+        }
       });
     });
   }, [groupId]);

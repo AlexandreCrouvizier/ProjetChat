@@ -1,117 +1,88 @@
 /**
- * websocket/group.handler.ts — Gestion des groupes en temps réel
- * 
- * Événements :
- *   group:join    → Utilisateur rejoint un salon (rejoint la room Socket.io)
- *   group:leave   → Utilisateur quitte un salon
+ * websocket/group.handler.ts — Phase 3 : join/leave rooms + broadcast
  */
-
-import { Server as SocketIOServer } from 'socket.io';
-import type { AuthenticatedSocket } from './index';
+import type { Server, Socket } from 'socket.io';
 import { groupRepository } from '../repositories/group.repository';
 import { TIER_LIMITS } from '../../../shared/constants';
 
-export function registerGroupHandlers(io: SocketIOServer, socket: AuthenticatedSocket): void {
-  const { userId, username, tier } = socket.user;
+export function registerGroupHandlers(io: Server, socket: Socket, user: any) {
 
-  /**
-   * group:join — Rejoindre un salon
-   * 
-   * Deux choses se passent :
-   *   1. En BDD : ajout dans group_members (persistant)
-   *   2. En Socket.io : socket.join("group:uuid") (temps réel)
-   */
-  socket.on('group:join', async (data: { group_id: string }, callback?: (res: any) => void) => {
+  /** Rejoindre un salon (room Socket.io) */
+  socket.on('group:join', async (data: { group_id: string }, callback?: Function) => {
     try {
-      const group = await groupRepository.findById(data.group_id);
+      const { group_id } = data;
+      if (!group_id) return;
+
+      const group = await groupRepository.findById(group_id);
       if (!group) {
-        callback?.({ success: false, error: 'Salon introuvable' });
+        callback?.({ error: 'NOT_FOUND' });
         return;
       }
 
-      // Vérifier si déjà membre
-      const alreadyMember = await groupRepository.isMember(data.group_id, userId);
-      if (alreadyMember) {
-        // Déjà membre → juste rejoindre la room Socket.io (reconnexion)
-        socket.join(`group:${data.group_id}`);
-        callback?.({ success: true, already_member: true });
-        return;
-      }
+      // Vérifier si déjà membre en BDD
+      const isMember = await groupRepository.isMember(group_id, user.userId);
 
-      // Vérifier les quotas de salons publics rejoints
-      if (group.type === 'public') {
-        const tierConfig = TIER_LIMITS[tier as keyof typeof TIER_LIMITS];
-        const maxGroups = tierConfig?.maxPublicGroups ?? 3;
-        
-        if (maxGroups !== Infinity) {
-          const joinedCount = await groupRepository.countJoinedPublicByUser(userId);
-          if (joinedCount >= maxGroups) {
-            callback?.({
-              success: false,
-              error: `Limite atteinte : ${maxGroups} salons publics maximum pour votre tier (${tier})`,
-            });
-            return;
+      if (!isMember) {
+        // Groupe public → rejoindre automatiquement
+        if (group.type === 'public') {
+          // Vérifier quota
+          const tierConfig = TIER_LIMITS[user.tier as keyof typeof TIER_LIMITS];
+          if (tierConfig.maxPublicGroups !== Infinity) {
+            const count = await groupRepository.countJoinedPublicByUser(user.userId);
+            if (count >= tierConfig.maxPublicGroups) {
+              callback?.({ error: 'QUOTA_EXCEEDED', message: `Limite de ${tierConfig.maxPublicGroups} salons atteinte` });
+              return;
+            }
           }
+          await groupRepository.addMember(group_id, user.userId, 'member');
+          await groupRepository.incrementMemberCount(group_id);
+        } else {
+          // Groupe privé → refuser (il faut une invitation)
+          callback?.({ error: 'FORBIDDEN', message: 'Salon privé — utilisez un lien d\'invitation' });
+          return;
         }
       }
 
-      // Vérifier que c'est un salon public (les privés nécessitent une invitation)
-      if (group.type === 'private') {
-        callback?.({ success: false, error: 'Ce salon est privé. Vous avez besoin d\'une invitation.' });
-        return;
-      }
-
-      // Ajouter en BDD
-      await groupRepository.addMember(data.group_id, userId, 'member');
-      await groupRepository.incrementMemberCount(data.group_id);
-
       // Rejoindre la room Socket.io
-      socket.join(`group:${data.group_id}`);
+      socket.join(`group:${group_id}`);
 
-      // Broadcast aux membres du groupe : "Paul a rejoint le salon"
-      io.to(`group:${data.group_id}`).emit('group:member_joined', {
-        group_id: data.group_id,
-        user: { id: userId, username, tier },
+      // Broadcast aux autres membres du salon
+      socket.to(`group:${group_id}`).emit('group:member_joined', {
+        group_id,
+        user: {
+          id: user.userId,
+          username: user.username,
+          tier: user.tier,
+        },
       });
 
-      console.log(`📥 [WS] ${username} a rejoint #${group.name}`);
       callback?.({ success: true });
-    } catch (error: any) {
-      console.error(`⚠️ [WS] group:join erreur:`, error.message);
-      callback?.({ success: false, error: error.message });
+    } catch (error) {
+      console.error('❌ group:join error:', error);
+      callback?.({ error: 'INTERNAL_ERROR' });
     }
   });
 
-  /**
-   * group:leave — Quitter un salon
-   */
-  socket.on('group:leave', async (data: { group_id: string }, callback?: (res: any) => void) => {
+  /** Quitter un salon */
+  socket.on('group:leave', async (data: { group_id: string }, callback?: Function) => {
     try {
-      const isMember = await groupRepository.isMember(data.group_id, userId);
-      if (!isMember) {
-        callback?.({ success: false, error: 'Vous n\'êtes pas membre de ce salon' });
-        return;
-      }
-
-      // Retirer de la BDD
-      await groupRepository.removeMember(data.group_id, userId);
-      await groupRepository.decrementMemberCount(data.group_id);
-
-      // Broadcast AVANT de quitter la room (sinon on ne reçoit pas son propre message)
-      io.to(`group:${data.group_id}`).emit('group:member_left', {
-        group_id: data.group_id,
-        user_id: userId,
-        username,
-      });
+      const { group_id } = data;
+      if (!group_id) return;
 
       // Quitter la room Socket.io
-      socket.leave(`group:${data.group_id}`);
+      socket.leave(`group:${group_id}`);
 
-      console.log(`📤 [WS] ${username} a quitté le salon ${data.group_id}`);
+      // Broadcast aux autres membres
+      socket.to(`group:${group_id}`).emit('group:member_left', {
+        group_id,
+        user_id: user.userId,
+        username: user.username,
+      });
+
       callback?.({ success: true });
-    } catch (error: any) {
-      console.error(`⚠️ [WS] group:leave erreur:`, error.message);
-      callback?.({ success: false, error: error.message });
+    } catch (error) {
+      console.error('❌ group:leave error:', error);
+      callback?.({ error: 'INTERNAL_ERROR' });
     }
   });
 }
