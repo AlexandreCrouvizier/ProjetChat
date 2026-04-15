@@ -60,10 +60,25 @@ export function useDMChat(conversationId: string | null, currentUserId: string |
         return { ...msg, reactions: data.reactions.map(r => ({ emoji: r.emoji, count: r.count, reacted: currentUserId ? r.users.includes(currentUserId) : false })) };
       }));
     };
+    // ⭐ Message masqué par la modération dans un DM
+    const onMessageHidden = (data: { message_id: string; parent_message_id: string | null }) => {
+      if (!data.parent_message_id) {
+        setMessages(prev => prev.map(msg =>
+          msg.id === data.message_id
+            ? { ...msg, is_hidden: true, content: 'Ce message a été supprimé par la modération.' }
+            : msg
+        ));
+      }
+    };
 
     socket.on('dm:new', onNewDM);
     socket.on('reaction:update', onReactionUpdate);
-    return () => { socket.off('dm:new', onNewDM); socket.off('reaction:update', onReactionUpdate); };
+    socket.on('message:hidden', onMessageHidden);
+    return () => {
+      socket.off('dm:new', onNewDM);
+      socket.off('reaction:update', onReactionUpdate);
+      socket.off('message:hidden', onMessageHidden);
+    };
   }, [conversationId, currentUserId]);
 
   const sendMessage = useCallback(async (content: string) => {

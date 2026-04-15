@@ -207,4 +207,12 @@ export const messageRepository = {
       .first();
     return parseInt(result?.count as string, 10) || 0;
   },
+
+  /** Soft delete — masquer un message (conservé en BDD pour LCEN) */
+  async softDelete(id: string, reason?: string): Promise<void> {
+    await db('messages').where({ id }).update({
+      is_hidden: true,
+      hidden_reason: reason || 'Supprimé par la modération',
+    });
+  },
 };

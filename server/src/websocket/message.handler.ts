@@ -71,7 +71,18 @@ export function registerMessageHandlers(io: SocketIOServer, socket: Authenticate
       if (callback) callback({ success: true, message });
     } catch (error: any) {
       console.error(`⚠️ [WS] message:send erreur (${username}):`, error.message);
-      if (callback) callback({ success: false, error: error.message });
+      // ⭐ Si erreur de mute, retourner les données enrichies (expires_at, reason)
+      if (error.muteData) {
+        if (callback) callback({
+          success: false,
+          error: error.message,
+          muted: true,
+          expires_at: error.muteData.expires_at,
+          reason: error.muteData.reason,
+        });
+      } else {
+        if (callback) callback({ success: false, error: error.message });
+      }
     }
   });
 

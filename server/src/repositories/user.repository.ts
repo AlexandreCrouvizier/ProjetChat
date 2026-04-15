@@ -27,6 +27,7 @@ export interface UserRow {
   ban_reason: string | null;
   ban_expires_at: string | null;
   is_muted: boolean;
+  mute_expires_at: string | null;
   last_seen_at: string | null;
   last_ip: string | null;
   created_at: string;
