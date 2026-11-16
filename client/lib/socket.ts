@@ -3,6 +3,20 @@ import type { ClientToServerEvents, ServerToClientEvents } from '@shared/types/w
 
 type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
+/**
+ * URL du serveur WebSocket.
+ * Par défaut : même machine que celle qui a servi la page, port 4000.
+ * → fonctionne sur le PC (localhost) ET depuis un téléphone du Wi-Fi local (192.168.x.x).
+ * NEXT_PUBLIC_WS_URL (client/.env.local) reste prioritaire si définie.
+ */
+function getSocketUrl(): string {
+  if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
+  if (typeof window !== 'undefined') {
+    return `${window.location.protocol}//${window.location.hostname}:4000`;
+  }
+  return 'http://localhost:4000';
+}
+
 let socket: TypedSocket | null = null;
 
 export function getSocket(): TypedSocket | null {
@@ -19,7 +33,7 @@ export function connectSocket(token: string): TypedSocket {
     socket = null;
   }
 
-  socket = io(process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:4000', {
+  socket = io(getSocketUrl(), {
     auth: { token },
     transports: ['websocket', 'polling'],
     reconnection: true,

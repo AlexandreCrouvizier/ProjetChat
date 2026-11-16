@@ -1,5 +1,3 @@
-version: "3.8"
-
 services:
   # PostgreSQL — Base de données principale
   postgres:
@@ -7,7 +5,7 @@ services:
     container_name: chatapp-postgres
     restart: unless-stopped
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"   # accessible uniquement depuis ce PC
     environment:
       POSTGRES_DB: chatapp
       POSTGRES_USER: chatapp
@@ -26,7 +24,7 @@ services:
     container_name: chatapp-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"   # accessible uniquement depuis ce PC (Redis sans mot de passe)
     command: redis-server --appendonly yes
     volumes:
       - redisdata:/data

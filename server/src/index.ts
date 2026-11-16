@@ -8,12 +8,22 @@
  */
 
 import http from 'http';
+import os from 'os';
 import { Server as SocketIOServer } from 'socket.io';
 import app from './app';
 import { env } from './config/env';
 import { testDatabaseConnection } from './config/database';
 import { redis } from './config/redis';
 import { setupWebSocket } from './websocket/index';
+import { corsOrigin } from './utils/cors';
+
+/** Adresses IPv4 de ce PC sur le réseau local (pour tester depuis un téléphone, etc.) */
+function getLanAddresses(): string[] {
+  return Object.values(os.networkInterfaces())
+    .flat()
+    .filter((i): i is os.NetworkInterfaceInfo => !!i && i.family === 'IPv4' && !i.internal)
+    .map((i) => i.address);
+}
 
 async function start() {
   console.log('');
@@ -32,7 +42,7 @@ async function start() {
   // 3. Configurer Socket.io
   const io = new SocketIOServer(server, {
     cors: {
-      origin: env.APP_URL,
+      origin: corsOrigin, // APP_URL (+ réseau local en dev)
       credentials: true,
     },
     transports: ['websocket', 'polling'],
@@ -51,6 +61,14 @@ async function start() {
     console.log(`   🌐 API REST  : http://localhost:${env.PORT}/api/health`);
     console.log(`   ⚡ WebSocket : ws://localhost:${env.PORT}`);
     console.log(`   📡 Frontend  : ${env.APP_URL}`);
+    if (env.isDev) {
+      const frontPort = new URL(env.APP_URL).port || '3000';
+      const lan = getLanAddresses();
+      if (lan.length) {
+        console.log('   📱 Depuis un autre appareil du Wi-Fi (lancer le client avec npm run dev:lan) :');
+        lan.forEach((ip) => console.log(`      http://${ip}:${frontPort}`));
+      }
+    }
     console.log('');
   });
 }

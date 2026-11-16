@@ -16,10 +16,11 @@ import adminRouter, { adminAuthRouter } from './routes/admin.routes';
 import uploadRoutes from './routes/upload.routes';
 import path from 'path';
 import { db } from './config/database';
+import { corsOrigin } from './utils/cors';
 
 const app = express();
 app.use(helmet());
-app.use(cors({ origin: env.APP_URL, credentials: true }));
+app.use(cors({ origin: corsOrigin, credentials: true })); // APP_URL (+ réseau local en dev)
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
