@@ -7,11 +7,11 @@ const nextConfig = {
     NEXT_PUBLIC_GIF_GIPHY_KEY:  process.env.GIF_GIPHY_API_KEY  || '',
     NEXT_PUBLIC_GIF_TENOR_KEY:  process.env.GIF_TENOR_API_KEY  || '',
   },
-  // Autorise les images depuis n'importe quel domaine (avatars, GIFs, etc.)
+  // 🔐 L'optimiseur d'images de Next.js n'est pas utilisé (aucun next/image) : on le désactive.
+  // Avant : remotePatterns '**' en faisait un proxy ouvert vers tout Internet, et Next 14
+  // a des failles critiques connues dans cet optimiseur (exécution de code à distance).
   images: {
-    remotePatterns: [
-      { protocol: 'https', hostname: '**' },
-    ],
+    unoptimized: true,
   },
   // Redirige les appels API vers le backend en dev
   async rewrites() {

@@ -28,15 +28,23 @@ export const guestSecurityService = {
    * Vérifie si un fingerprint est actuellement banni.
    * Gère les bans temporaires (expires_at) et permanents.
    */
-  async isFingerprintBanned(fingerprint: string): Promise<{ banned: boolean; reason?: string; permanent?: boolean }> {
+  async isFingerprintBanned(fingerprint: string): Promise<{ banned: boolean; reason?: string; permanent?: boolean; expiresAt?: Date | null }> {
+    // 🐛 Correctif : sans parenthèses, la requête valait
+    //   (fingerprint = X AND expires_at IS NULL) OR expires_at > maintenant
+    // → un SEUL ban temporaire en cours bloquait TOUS les invités.
     const row = await db('banned_fingerprints')
       .where({ fingerprint })
-      .whereNull('expires_at')
-      .orWhere('expires_at', '>', db.fn.now())
+      .where((q) => q.whereNull('expires_at').orWhere('expires_at', '>', db.fn.now()))
+      .orderBy('created_at', 'desc')
       .first();
 
     if (!row) return { banned: false };
-    return { banned: true, reason: row.reason || 'Accès refusé', permanent: row.is_permanent };
+    return {
+      banned: true,
+      reason: row.reason || 'Accès refusé',
+      permanent: !row.expires_at,
+      expiresAt: row.expires_at ? new Date(row.expires_at) : null,
+    };
   },
 
   /**
@@ -58,8 +66,11 @@ export const guestSecurityService = {
     if (ipRow) return true;
 
     // L'IP a-t-elle déjà atteint le seuil de bans (même sans permaban explicite) ?
+    // Seuls les bans ENCORE ACTIFS comptent (sinon des bans expirés depuis longtemps
+    // finissent par bloquer définitivement tout un foyer derrière la même box)
     const banCount = await db('banned_fingerprints')
       .where('last_known_ip', ip)
+      .where((q) => q.whereNull('expires_at').orWhere('expires_at', '>', db.fn.now()))
       .count('id as count')
       .first();
 
@@ -126,9 +137,10 @@ export const guestSecurityService = {
 
     if (!params.lastKnownIp) return { permaban_triggered: false, ip_ban_count: 0 };
 
-    // 2. Compter le nombre de fingerprints distincts bannis sur cette IP
+    // 2. Compter le nombre de fingerprints distincts ACTUELLEMENT bannis sur cette IP
     const countResult = await db('banned_fingerprints')
       .where('last_known_ip', params.lastKnownIp)
+      .where((q) => q.whereNull('expires_at').orWhere('expires_at', '>', db.fn.now()))
       .count('id as count')
       .first();
     const ipBanCount = parseInt(countResult?.count as string || '0', 10);
@@ -153,8 +165,24 @@ export const guestSecurityService = {
   /**
    * Débanne un fingerprint.
    */
-  async unbanFingerprint(fingerprint: string): Promise<void> {
+  async unbanFingerprint(fingerprint: string): Promise<{ ipAutoBanLifted: string | null }> {
+    const row = await db('banned_fingerprints').where({ fingerprint }).select('last_known_ip').first();
     await db('banned_fingerprints').where({ fingerprint }).delete();
+
+    // Le ban AUTOMATIQUE de l'IP (déclenché au 3ᵉ invité banni) est levé s'il n'est plus justifié.
+    // Un ban d'IP posé à la main par l'admin (is_auto = false) n'est jamais touché ici.
+    const ip = row?.last_known_ip;
+    if (!ip) return { ipAutoBanLifted: null };
+    const remaining = await db('banned_fingerprints')
+      .where('last_known_ip', ip)
+      .where((q) => q.whereNull('expires_at').orWhere('expires_at', '>', db.fn.now()))
+      .count('id as count')
+      .first();
+    if (parseInt(remaining?.count as string || '0', 10) < AUTO_PERMABAN_THRESHOLD) {
+      const deleted = await db('banned_ips').where({ ip_address: ip, is_auto: true }).delete();
+      if (deleted) return { ipAutoBanLifted: String(ip) };
+    }
+    return { ipAutoBanLifted: null };
   },
 
   /**

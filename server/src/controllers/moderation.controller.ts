@@ -12,6 +12,8 @@ import { messageRepository } from '../repositories/message.repository';
 import { userRepository } from '../repositories/user.repository';
 import { logAudit } from '../middleware/audit.middleware';
 import { getIpFromRequest } from '../utils/ip';
+import { revokeUserAccess } from '../services/accessRevocation.service';
+import { guestSecurityService } from '../services/guestSecurity.service';
 
 const AUTO_HIDE_THRESHOLD = 3;
 
@@ -264,6 +266,9 @@ export const moderationController = {
         target_user_id: targetId, duration, reason,
       });
 
+      // 🔐 Couper réellement l'accès (sessions + WebSocket)
+      await revokeUserAccess(req.app.get('io'), targetId);
+
       res.json({ action, message: `Utilisateur banni (${duration})` });
     } catch (error: any) {
       console.error('❌ banUser:', error);
@@ -279,6 +284,9 @@ export const moderationController = {
       await userRepository.update(targetId, {
         is_banned: false, ban_reason: null, ban_expires_at: null,
       } as any);
+      // 🐛 Un invité est aussi banni par son empreinte : la lever également
+      const target: any = await userRepository.findById(targetId);
+      if (target?.guest_fingerprint) await guestSecurityService.unbanFingerprint(target.guest_fingerprint);
       await moderationActionRepository.create({
         target_user_id: targetId, moderator_id: moderatorId,
         action: 'unban', reason: 'Débanni par modérateur',

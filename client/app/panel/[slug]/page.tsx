@@ -17,6 +17,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
+import { safeMediaUrl } from '@/lib/safeUrl';
 
 // ─── SessionStorage helpers ───────────────────────────────────────
 const ADMIN_TOKEN_KEY = 'admin_token';
@@ -47,8 +48,11 @@ type Screen = 'loading' | 'login' | 'denied' | 'setup' | 'verify' | 'dashboard';
 type Tab = 'stats' | 'moderation' | 'users' | 'groups' | 'settings' | 'security';
 
 // ─── Composant : aperçu image dans les signalements ──────────────────────────
-function AdminReportImage({ url, type }: { url: string; type: string }) {
+function AdminReportImage({ url: rawUrl, type }: { url: string; type: string }) {
   const [open, setOpen] = useState(false);
+  // 🔐 Un contenu signalé peut être malveillant : URL filtrée avant affichage dans le panel
+  const url = safeMediaUrl(rawUrl);
+  if (!url) return null;
   return (
     <div className="mb-3">
       <div className="text-[9px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'rgba(255,255,255,0.3)' }}>

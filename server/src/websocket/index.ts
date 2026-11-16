@@ -12,6 +12,7 @@ import { registerMessageHandlers } from './message.handler';
 import { registerGroupHandlers } from './group.handler';
 import { registerReactionHandlers } from './reaction.handler';
 import { registerConversationHandlers } from './conversation.handler';
+import { isBanActive } from '../services/accessRevocation.service';
 
 interface AuthenticatedSocket extends Socket {
   user: JwtPayload;
@@ -26,7 +27,7 @@ export function setupWebSocket(io: SocketIOServer): void {
       const payload = verifyAccessToken(token);
       const user = await userRepository.findById(payload.userId);
       if (!user) return next(new Error('Utilisateur introuvable'));
-      if (user.is_banned) return next(new Error('Compte suspendu'));
+      if (isBanActive(user)) return next(new Error('Compte suspendu'));
       (socket as AuthenticatedSocket).user = payload;
       (socket as AuthenticatedSocket).userIp = getIpFromSocket(socket);
       next();

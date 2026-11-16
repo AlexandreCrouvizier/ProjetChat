@@ -50,7 +50,8 @@ export const userRepository = {
 
   /** Trouver un user par email */
   async findByEmail(email: string): Promise<UserRow | null> {
-    return db('users').where({ email }).first() || null;
+    // 🔐 Insensible à la casse : "Paul@Mail.com" et "paul@mail.com" = même compte
+    return db('users').whereRaw('LOWER(email) = ?', [String(email).trim().toLowerCase()]).first() || null;
   },
 
   /** Trouver un user par username */
@@ -101,7 +102,7 @@ export const userRepository = {
 
   /** Vérifier si un email est déjà utilisé */
   async isEmailTaken(email: string): Promise<boolean> {
-    const user = await db('users').where({ email }).first();
+    const user = await db('users').whereRaw('LOWER(email) = ?', [String(email).trim().toLowerCase()]).first();
     return !!user;
   },
 

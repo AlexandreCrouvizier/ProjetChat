@@ -32,14 +32,26 @@ export const env = {
 
   // LCEN
   LCEN_RETENTION_DAYS: parseInt(process.env.LCEN_RETENTION_DAYS || '365', 10),
+
+  // 🔐 Secret des tokens du panel admin (émis après TOTP).
+  // Absent en dev → dérivé du secret d'accès (HMAC), jamais une valeur connue.
+  ADMIN_JWT_SECRET: process.env.ADMIN_JWT_SECRET || '',
 };
 
 // Vérifie les variables critiques en production
 if (!env.isDev) {
-  const required = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'DATABASE_URL'];
+  const required = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'ADMIN_JWT_SECRET', 'DATABASE_URL'];
   for (const key of required) {
     if (!process.env[key]) {
       throw new Error(`Variable d'environnement manquante : ${key}`);
     }
+  }
+  // 🔐 Refuser de démarrer en production avec des secrets faibles ou identiques
+  const secrets = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'ADMIN_JWT_SECRET'].map((k) => process.env[k] || '');
+  if (secrets.some((s) => s.length < 64 || /^(dev|CHANGE_ME)/i.test(s))) {
+    throw new Error('Secrets JWT trop faibles en production (64 caractères aléatoires minimum)');
+  }
+  if (new Set(secrets).size !== secrets.length) {
+    throw new Error('Les secrets JWT doivent être tous différents');
   }
 }

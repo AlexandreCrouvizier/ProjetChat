@@ -21,6 +21,17 @@ import { BadRequestError, ForbiddenError, RateLimitError } from '../utils/errors
 import { VALIDATION, TIER_LIMITS } from '../../../shared/constants';
 import { db } from '../config/database';
 
+// 🔐 Types de message qu'un client a le droit d'envoyer ('system' est réservé au serveur)
+const CLIENT_MESSAGE_TYPES = ['text', 'image', 'file', 'gif'];
+// 🔐 Les médias doivent provenir de NOS uploads (nom = UUID généré par le serveur)
+const IMAGE_URL_RE = /^\/uploads\/images\/[0-9a-f-]{36}\.(webp|jpe?g|png|gif)$/i;
+const FILE_URL_RE  = /^\/uploads\/files\/[0-9a-f-]{36}\.[a-z0-9]{1,10}$/i;
+
+function isSafeHttpsUrl(value: unknown, maxLength = 1000): value is string {
+  if (typeof value !== 'string' || value.length > maxLength) return false;
+  try { return new URL(value).protocol === 'https:'; } catch { return false; }
+}
+
 /**
  * Formate un message brut (avec champs plats) en message structuré (avec author: {})
  * Utilisé par sendMessage ET getGroupMessages pour garantir le même format
@@ -71,6 +82,30 @@ export const messageService = {
     ip: string;
   }) {
     const messageType = data.type || 'text';
+
+    // 🔐 Validation stricte des champs envoyés par le client (WebSocket = données non fiables).
+    // Avant : file_url / gif_url / type étaient libres → un invité pouvait envoyer une « image »
+    // pointant vers n'importe quel site (traçage d'IP) ou un lien javascript: (vol de session).
+    if (!CLIENT_MESSAGE_TYPES.includes(messageType)) {
+      throw new BadRequestError('Type de message invalide');
+    }
+    if (data.content !== undefined && data.content !== null && typeof data.content !== 'string') {
+      throw new BadRequestError('Contenu invalide');
+    }
+    if (messageType === 'image') {
+      if (data.tier === 'guest') throw new ForbiddenError('Le partage de médias est réservé aux membres inscrits.');
+      if (!data.fileUrl || !IMAGE_URL_RE.test(data.fileUrl)) throw new BadRequestError('Image invalide');
+    }
+    if (messageType === 'file') {
+      if (data.tier !== 'premium') throw new ForbiddenError('Le partage de fichiers est réservé aux membres Premium.');
+      if (!data.fileUrl || !FILE_URL_RE.test(data.fileUrl)) throw new BadRequestError('Fichier invalide');
+    }
+    if (messageType === 'gif' && !isSafeHttpsUrl(data.gifUrl)) {
+      throw new BadRequestError('GIF invalide');
+    }
+    // Un champ média ne peut accompagner que le type correspondant
+    if (messageType !== 'image' && messageType !== 'file') data.fileUrl = undefined;
+    if (messageType !== 'gif') data.gifUrl = undefined;
 
     // Validation contenu : obligatoire sauf pour image/gif/file
     if (messageType === 'text' && (!data.content || data.content.trim().length === 0)) {
@@ -145,13 +180,18 @@ export const messageService = {
       throw new BadRequestError(modResult.reason || 'Message bloqué');
     }
 
+    // 🔐 Le message cité / le fil parent doivent appartenir au MÊME salon ou à la même conversation
+    // (sinon on pourrait faire apparaître le contenu d'un salon privé ou d'un DM dans un salon public)
+    const sameScope = (m: any) =>
+      (m.group_id || null) === (data.groupId || null) &&
+      (m.conversation_id || null) === (data.conversationId || null);
     if (data.replyToId) {
       const replyTo = await messageRepository.findById(data.replyToId);
-      if (!replyTo) throw new BadRequestError('Message cité introuvable');
+      if (!replyTo || !sameScope(replyTo)) throw new BadRequestError('Message cité introuvable');
     }
     if (data.parentMessageId) {
       const parent = await messageRepository.findById(data.parentMessageId);
-      if (!parent) throw new BadRequestError('Message parent introuvable');
+      if (!parent || !sameScope(parent)) throw new BadRequestError('Message parent introuvable');
     }
 
     const message = await messageRepository.create({

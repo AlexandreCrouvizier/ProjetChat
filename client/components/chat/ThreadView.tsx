@@ -12,6 +12,7 @@ import api from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { MessageContent } from './MessageContent';
 import type { ChatMessage } from '@/hooks/useChat';
+import { showModal } from '@/components/ui/AppModal';
 
 interface ThreadViewProps {
   parentMessageId: string;
@@ -103,7 +104,7 @@ export function ThreadView({ parentMessageId, groupId, currentUserId, currentUse
               expires_at: res.expires_at || null,
             });
           } else {
-            alert(errMsg);
+            showModal(errMsg, 'error');
           }
         }
         setSending(false);

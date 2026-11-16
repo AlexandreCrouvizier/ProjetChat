@@ -43,12 +43,12 @@ export function generateRefreshToken(payload: JwtPayload): string {
  * Retourne le payload si valide, throw si expiré/invalide
  */
 export function verifyAccessToken(token: string): JwtPayload {
-  return jwt.verify(token, env.JWT_ACCESS_SECRET) as JwtPayload;
+  return jwt.verify(token, env.JWT_ACCESS_SECRET, { algorithms: ['HS256'] }) as JwtPayload;
 }
 
 /**
  * Vérifie et décode un Refresh Token
  */
 export function verifyRefreshToken(token: string): JwtPayload {
-  return jwt.verify(token, env.JWT_REFRESH_SECRET) as JwtPayload;
+  return jwt.verify(token, env.JWT_REFRESH_SECRET, { algorithms: ['HS256'] }) as JwtPayload;
 }

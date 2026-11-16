@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import api from '@/lib/api';
+import { showModal } from '@/components/ui/AppModal';
 
 interface ProfileModalProps {
   userId: string | null;
@@ -114,7 +115,7 @@ export function ProfileModal({ userId, currentUserId, currentUserTier, isOpen, o
         setIsBlocked(true);
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Erreur');
+      showModal(err.response?.data?.message || 'Erreur', 'error');
     }
     setBlockLoading(false);
   };

@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
 import { getSocket } from '@/lib/socket';
+import { showModal } from '@/components/ui/AppModal';
 
 export interface Group {
   id: string; name: string; description: string | null; type: string;
@@ -90,7 +91,7 @@ export function useGroups() {
       if (socket) socket.emit('group:leave', { group_id: groupId });
       setGroups(prev => prev.filter(g => g.id !== groupId));
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Erreur');
+      showModal(err.response?.data?.message || 'Erreur', 'error');
     }
   }, []);
 
@@ -100,7 +101,7 @@ export function useGroups() {
       await loadGroups(); // Rafraîchir la liste
       return result.group;
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Erreur');
+      showModal(err.response?.data?.message || 'Erreur', 'error');
       return null;
     }
   }, [loadGroups]);
@@ -110,7 +111,7 @@ export function useGroups() {
       await api.delete(`/groups/${groupId}`);
       setGroups(prev => prev.filter(g => g.id !== groupId));
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Erreur');
+      showModal(err.response?.data?.message || 'Erreur', 'error');
     }
   }, []);
 

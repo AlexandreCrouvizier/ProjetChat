@@ -14,6 +14,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import { redis } from '../config/redis';
 import { TIER_LIMITS } from '../../../shared/constants';
+import { getIpFromRequest } from '../utils/ip';
 
 /**
  * Vérifie si un utilisateur peut envoyer un message (rate limit)
@@ -37,29 +38,54 @@ export async function checkRateLimit(userId: string, tier: string): Promise<bool
 }
 
 /**
- * Middleware Express pour le rate limiting global (par IP)
- * Plus général que le rate limit par message
+ * Compteur générique à fenêtre fixe.
+ * Retourne { allowed, retryAfter } — fail-open si Redis est indisponible (log l'erreur).
  */
-export function rateLimitMiddleware(maxRequests: number, windowSeconds: number) {
-  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const ip = req.ip || req.socket.remoteAddress || 'unknown';
-    const key = `ratelimit:api:${ip}`;
-
-    const current = await redis.incr(key);
-    
-    if (current === 1) {
-      // Première requête → initialise le TTL
-      await redis.expire(key, windowSeconds);
+export async function hitLimit(
+  key: string, max: number, windowSeconds: number,
+): Promise<{ allowed: boolean; retryAfter: number }> {
+  try {
+    const fullKey = `ratelimit:${key}`;
+    const current = await redis.incr(fullKey);
+    if (current === 1) await redis.expire(fullKey, windowSeconds);
+    if (current > max) {
+      const ttl = await redis.ttl(fullKey);
+      return { allowed: false, retryAfter: ttl > 0 ? ttl : windowSeconds };
     }
+    return { allowed: true, retryAfter: 0 };
+  } catch (err) {
+    console.error('⚠️ Rate limit indisponible (Redis) :', (err as any)?.message || err);
+    return { allowed: true, retryAfter: 0 };
+  }
+}
 
-    if (current > maxRequests) {
+/** Remet un compteur à zéro (ex. après une connexion réussie) */
+export async function resetLimit(key: string): Promise<void> {
+  try { await redis.del(`ratelimit:${key}`); } catch { /* non bloquant */ }
+}
+
+/**
+ * 🔐 Middleware Express de limitation de débit.
+ *   name : identifiant de la règle (ex. 'login')
+ *   by   : 'ip' (défaut) ou 'user' (nécessite requireAuth avant)
+ */
+export function rateLimit(opts: { name: string; max: number; windowSeconds: number; by?: 'ip' | 'user' }) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    const subject = opts.by === 'user' && req.user?.userId ? `u:${req.user.userId}` : `ip:${getIpFromRequest(req)}`;
+    const { allowed, retryAfter } = await hitLimit(`${opts.name}:${subject}`, opts.max, opts.windowSeconds);
+    if (!allowed) {
+      res.setHeader('Retry-After', String(retryAfter));
       res.status(429).json({
         error: 'RATE_LIMITED',
-        message: `Trop de requêtes. Réessayez dans ${windowSeconds} secondes.`,
+        message: `Trop de tentatives. Réessayez dans ${Math.ceil(retryAfter / 60)} min.`,
       });
       return;
     }
-
     next();
   };
+}
+
+/** @deprecated conservé pour compatibilité — utiliser rateLimit() */
+export function rateLimitMiddleware(maxRequests: number, windowSeconds: number) {
+  return rateLimit({ name: 'api', max: maxRequests, windowSeconds });
 }

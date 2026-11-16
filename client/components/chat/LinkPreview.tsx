@@ -8,6 +8,7 @@
 'use client';
 
 import { useState } from 'react';
+import { safeMediaUrl, safeHttpsUrl } from '@/lib/safeUrl';
 
 interface LinkPreviewData {
   title:       string;
@@ -28,20 +29,24 @@ function getDomain(url: string): string {
 
 export function LinkPreview({ preview }: LinkPreviewProps) {
   const [imgError, setImgError] = useState(false);
-  const domain = getDomain(preview.url);
+  // 🔐 Lien et image d'aperçu filtrés (pas de javascript: / data:)
+  const href  = safeMediaUrl(preview.url);
+  const image = safeHttpsUrl(preview.image);
+  if (!href) return null;
+  const domain = getDomain(href);
 
   return (
     <a
-      href={preview.url}
+      href={href}
       target="_blank"
       rel="noopener noreferrer"
       className="block mt-2 max-w-sm rounded-xl border border-[var(--border)] bg-[var(--bg2)] overflow-hidden hover:border-[var(--border-f)] hover:bg-[var(--glass-h)] transition-all group"
     >
       {/* Image de couverture */}
-      {preview.image && !imgError && (
+      {image && !imgError && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={preview.image}
+          src={image}
           alt={preview.title}
           onError={() => setImgError(true)}
           className="w-full h-32 object-cover border-b border-[var(--border)]"

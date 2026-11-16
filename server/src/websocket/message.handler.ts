@@ -7,6 +7,7 @@
  *   gif_url?  : URL Tenor pour le type gif
  */
 import { Server as SocketIOServer } from 'socket.io';
+import { AppError } from '../utils/errors';
 import type { AuthenticatedSocket } from './index';
 import { messageService } from '../services/message.service';
 import { mentionService } from '../services/mention.service';
@@ -86,7 +87,7 @@ export function registerMessageHandlers(io: SocketIOServer, socket: Authenticate
           reason: error.muteData.reason,
         });
       } else {
-        if (callback) callback({ success: false, error: error.message });
+        if (callback) callback({ success: false, error: publicError(error) });
       }
     }
   });
@@ -115,4 +116,9 @@ async function getTypingUsers(groupId: string) {
     if (uname) users.push({ id: key.split(':')[2], username: uname });
   }
   return users;
+}
+
+/** 🔐 Seules nos erreurs métier (AppError) sont montrées au client ; le reste reste dans les logs serveur */
+function publicError(error: any): string {
+  return error instanceof AppError ? error.message : 'Erreur serveur';
 }

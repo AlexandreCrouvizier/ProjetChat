@@ -11,6 +11,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import api from '@/lib/api';
+import { showModal } from '@/components/ui/AppModal';
 
 interface Invitation {
   id: string;
@@ -101,7 +102,7 @@ export function InviteModal({ isOpen, groupId, groupName, onClose }: InviteModal
       setNewLink(link);
       await loadInvitations();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Erreur lors de la création');
+      showModal(err.response?.data?.message || 'Erreur lors de la création', 'error');
     }
     setCreating(false);
   };

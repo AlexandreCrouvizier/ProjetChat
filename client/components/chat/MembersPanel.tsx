@@ -19,6 +19,7 @@ import api from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/hooks/useAuth';
 import { InviteModal } from '@/components/modals/InviteModal';
+import { showModal } from '@/components/ui/AppModal';
 
 interface Member {
   id: string;
@@ -159,7 +160,7 @@ export function MembersPanel({ groupId, groupType, groupName, onMemberClick }: M
       else if (action === 'kick') { if (!window.confirm('Expulser ce membre du salon ?')) return; await api.post(`/groups/${groupId}/members/${targetId}/kick`); }
       else if (action === 'mute') await api.post(`/groups/${groupId}/members/${targetId}/mute`);
       await loadMembers();
-    } catch (err: any) { alert(err.response?.data?.message || 'Erreur'); }
+    } catch (err: any) { showModal(err.response?.data?.message || 'Erreur', 'error'); }
     setContextMenu(null);
   };
 

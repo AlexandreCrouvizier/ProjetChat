@@ -7,15 +7,17 @@ import { authController } from '../controllers/auth.controller';
 import { oauthController } from '../controllers/oauth.controller';
 import { requireAuth } from '../middleware/auth.middleware';
 import { audit } from '../middleware/audit.middleware';
+import { rateLimit } from '../middleware/rateLimit.middleware';
 import passport from '../config/passport';
 
 const router = Router();
 
 // ===== Routes classiques =====
-router.post('/register', audit('register'), authController.register);
-router.post('/login',    audit('login'),    authController.login);
-router.post('/guest',    audit('guest'),    authController.guest);
-router.post('/refresh',                     authController.refresh);
+// 🔐 Limitation de débit par IP (anti brute-force / anti création massive de comptes)
+router.post('/register', rateLimit({ name: 'register', max: 10, windowSeconds: 3600 }), audit('register'), authController.register);
+router.post('/login',    rateLimit({ name: 'login',    max: 20, windowSeconds: 900 }),  audit('login'),    authController.login);
+router.post('/guest',    rateLimit({ name: 'guest',    max: 30, windowSeconds: 900 }) , audit('guest'),    authController.guest);
+router.post('/refresh',  rateLimit({ name: 'refresh',  max: 60, windowSeconds: 900 }),                     authController.refresh);
 router.post('/logout',   requireAuth,       authController.logout);
 router.get('/me',        requireAuth,       authController.me);
 

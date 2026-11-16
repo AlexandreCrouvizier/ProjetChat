@@ -1,41 +1,43 @@
 /**
  * utils/ip.ts — Extraction de l'IP du client
- * 
- * LCEN : chaque action doit être associée à une IP.
- * 
- * En production, le client passe par NGINX (reverse proxy).
- * L'IP réelle est dans le header X-Forwarded-For, pas dans req.ip
- * (qui serait l'IP de NGINX = 127.0.0.1).
+ *
+ * LCEN : chaque action doit être associée à une IP fiable.
+ *
+ * 🔐 SÉCURITÉ : l'en-tête X-Forwarded-For est fourni par le client → falsifiable.
+ * On ne l'utilise QUE si la connexion vient de notre propre proxy, sur la même machine
+ * (Next.js en dev, NGINX en production). Dans ce cas on prend la DERNIÈRE IP de la liste :
+ * c'est celle ajoutée par notre proxy (les précédentes peuvent être inventées par le client).
+ * Sinon (connexion directe, ex. WebSocket sur :4000), on prend l'adresse TCP réelle.
  */
 
 import type { Request } from 'express';
 import type { Socket } from 'socket.io';
 
-/**
- * Récupère l'IP du client depuis une requête Express
- */
-export function getIpFromRequest(req: Request): string {
-  // X-Forwarded-For contient potentiellement plusieurs IPs : "client, proxy1, proxy2"
-  // On prend la première = l'IP réelle du client
-  const forwarded = req.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    return forwarded.split(',')[0].trim();
-  }
-  if (Array.isArray(forwarded) && forwarded.length > 0) {
-    return forwarded[0].split(',')[0].trim();
-  }
+const TRUSTED_PROXIES = new Set(['127.0.0.1', '::1']);
 
-  // Fallback : IP directe (en dev, sans proxy)
-  return req.ip || req.socket.remoteAddress || '0.0.0.0';
+/** Retire le préfixe IPv4-mappé ("::ffff:192.168.1.10" → "192.168.1.10") */
+export function normalizeIp(ip: string | undefined | null): string {
+  if (!ip) return '0.0.0.0';
+  const trimmed = ip.trim();
+  return trimmed.startsWith('::ffff:') ? trimmed.substring(7) : trimmed;
 }
 
-/**
- * Récupère l'IP du client depuis un Socket.io
- */
+function resolveClientIp(peer: string | undefined, forwarded: string | string[] | undefined): string {
+  const peerIp = normalizeIp(peer);
+  if (!TRUSTED_PROXIES.has(peerIp) || !forwarded) return peerIp;
+
+  const raw = Array.isArray(forwarded) ? forwarded.join(',') : forwarded;
+  const hops = raw.split(',').map((h) => h.trim()).filter(Boolean);
+  const last = hops[hops.length - 1];
+  return last ? normalizeIp(last) : peerIp;
+}
+
+/** IP du client depuis une requête Express */
+export function getIpFromRequest(req: Request): string {
+  return resolveClientIp(req.socket.remoteAddress, req.headers['x-forwarded-for']);
+}
+
+/** IP du client depuis un Socket.io */
 export function getIpFromSocket(socket: Socket): string {
-  const forwarded = socket.handshake.headers['x-forwarded-for'];
-  if (typeof forwarded === 'string') {
-    return forwarded.split(',')[0].trim();
-  }
-  return socket.handshake.address || '0.0.0.0';
+  return resolveClientIp(socket.handshake.address, socket.handshake.headers['x-forwarded-for']);
 }

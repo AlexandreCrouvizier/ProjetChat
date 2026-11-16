@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import api from '@/lib/api';
 import { getSocket } from '@/lib/socket';
+import { showModal } from '@/components/ui/AppModal';
 
 export interface Conversation {
   id: string;
@@ -50,7 +51,7 @@ export function useConversations() {
       if (socket) socket.emit('conversation:join', { conversation_id: convId });
       await loadConversations();
       return convId;
-    } catch (err: any) { alert(err.response?.data?.message || 'Erreur'); return null; }
+    } catch (err: any) { showModal(err.response?.data?.message || 'Erreur', 'error'); return null; }
   }, [loadConversations]);
 
   /** ⭐ Masquer une conversation (ne supprime rien, réapparaîtra si l'autre écrit) */
@@ -58,7 +59,7 @@ export function useConversations() {
     try {
       await api.delete(`/conversations/${convId}`);
       setConversations(prev => prev.filter(c => c.id !== convId));
-    } catch (err: any) { alert(err.response?.data?.message || 'Erreur'); }
+    } catch (err: any) { showModal(err.response?.data?.message || 'Erreur', 'error'); }
   }, []);
 
   return { conversations, isLoading, loadConversations, startConversation, hideConversation };

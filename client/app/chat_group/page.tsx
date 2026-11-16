@@ -27,6 +27,7 @@ import { CreateGroupModal } from '@/components/modals/CreateGroupModal';
 import { ReportModal } from '@/components/modals/ReportModal';
 import { useRouter, useSearchParams } from 'next/navigation';
 import api from '@/lib/api';
+import { showModal } from '@/components/ui/AppModal';
 
 type ChatMode = 'group' | 'dm';
 
@@ -160,7 +161,7 @@ export default function ChatPage() {
           expires_at: err.expires_at || null,
           admin_message: err.admin_message,
         });
-      } else { alert(msg); }
+      } else { showModal(msg, 'warning'); }
     }
   };
 
@@ -171,7 +172,7 @@ export default function ChatPage() {
       const msg = err.message || '';
       if (msg.includes('muté') || msg.includes('muted') || err.muted) {
         setMuteInfo({ duration: '', reason: msg, expires_at: err.expires_at || null });
-      } else { alert(msg); }
+      } else { showModal(msg, 'warning'); }
     }
   };
   const handleStartDM = async (targetId: string) => {
@@ -213,7 +214,7 @@ export default function ChatPage() {
     // Déléguer au handleSendMedia via un event synthétique
     const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|gif|webp)$/i.test(file.name);
     if (!isImage && user?.tier !== 'premium') {
-      alert('Le partage de fichiers est réservé aux membres Premium.');
+      showModal('Le partage de fichiers est réservé aux membres Premium.', 'warning');
       return;
     }
     try {
@@ -221,7 +222,7 @@ export default function ChatPage() {
       const upFn = isImage ? uploadImage : uploadFile;
       const { url } = await upFn(file);
       await handleSendMedia({ type: isImage ? 'image' : 'file', file_url: url, content: file.name });
-    } catch (err: any) { alert(err.message || 'Erreur lors de l\'envoi'); }
+    } catch (err: any) { showModal(err.message || 'Erreur lors de l\'envoi', 'error'); }
   }, [activeGroupId, user?.tier, handleSendMedia]);
 
   return (

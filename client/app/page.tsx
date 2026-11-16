@@ -7,6 +7,7 @@
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
 import { useState } from 'react';
+import { showModal } from '@/components/ui/AppModal';
 
 export default function LandingPage() {
   const { loginAsGuest } = useAuth();
@@ -17,7 +18,7 @@ export default function LandingPage() {
     try {
       await loginAsGuest();
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Erreur de connexion');
+      showModal(err.response?.data?.message || 'Connexion invité impossible. Réessayez dans un instant.', 'error');
     }
     setLoading(false);
   };

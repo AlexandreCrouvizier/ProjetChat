@@ -20,6 +20,8 @@
 import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
 import { requireSuperAdmin, requireAdminToken } from '../middleware/superadmin.middleware';
+import { rateLimit } from '../middleware/rateLimit.middleware';
+import { revokeUserAccess } from '../services/accessRevocation.service';
 import { adminAuthController } from '../controllers/admin-auth.controller';
 import { cleanupService } from '../services/cleanup.service';
 import { moderationActionRepository } from '../repositories/moderation-action.repository';
@@ -35,7 +37,8 @@ export const adminAuthRouter = Router();
 adminAuthRouter.use(requireAuth, requireSuperAdmin);
 adminAuthRouter.get('/status', adminAuthController.status);
 adminAuthRouter.post('/setup', adminAuthController.setup);
-adminAuthRouter.post('/verify', adminAuthController.verify);
+// 🔐 Anti brute-force TOTP : 5 essais / 15 min par compte
+adminAuthRouter.post('/verify', rateLimit({ name: 'totp', max: 5, windowSeconds: 900, by: 'user' }), adminAuthController.verify);
 
 // ══════════════════════════════════
 // Dashboard admin (post-TOTP)
@@ -223,6 +226,9 @@ adminRouter.post('/users/:id/ban', async (req, res) => {
       });
     }
 
+    // 🔐 Couper réellement l'accès (sessions + WebSocket)
+    await revokeUserAccess(io, targetId);
+
     res.json({ message: 'Utilisateur banni', expires_at: banAction.expires_at });
   } catch (error: any) {
     console.error('❌ admin ban:', error);
@@ -231,11 +237,27 @@ adminRouter.post('/users/:id/ban', async (req, res) => {
 });
 
 /** POST /api/admin/users/:id/unban */
-adminRouter.post('/users/:id/unban', async (_req, res) => {
+adminRouter.post('/users/:id/unban', async (req, res) => {
   try {
-    await db('users').where({ id: _req.params.id }).update({
+    const targetId = req.params.id;
+    const target = await db('users').where({ id: targetId }).select('tier', 'guest_fingerprint').first();
+    if (!target) { res.status(404).json({ error: 'NOT_FOUND' }); return; }
+
+    await db('users').where({ id: targetId }).update({
       is_banned: false, ban_reason: null, ban_expires_at: null,
     });
+
+    // 🐛 Correctif : un invité est aussi banni par son empreinte navigateur.
+    // Sans ça, il restait bloqué à la reconnexion même après le débannissement.
+    if (target.guest_fingerprint) {
+      await guestSecurityService.unbanFingerprint(target.guest_fingerprint);
+    }
+
+    await moderationActionRepository.create({
+      target_user_id: targetId, moderator_id: req.user!.userId,
+      action: 'unban', reason: 'Débanni par l\'administrateur',
+    });
+
     res.json({ message: 'Utilisateur débanni' });
   } catch (error: any) {
     res.status(500).json({ error: 'INTERNAL_ERROR' });
@@ -544,8 +566,13 @@ adminRouter.get('/security/fingerprints', async (req, res) => {
 /** DELETE /api/admin/security/fingerprints/:fp — Débannir un fingerprint */
 adminRouter.delete('/security/fingerprints/:fp', async (req, res) => {
   try {
-    await guestSecurityService.unbanFingerprint(req.params.fp);
-    res.json({ success: true });
+    const result = await guestSecurityService.unbanFingerprint(req.params.fp);
+    // 🐛 Débannir l'empreinte débannit aussi le compte invité correspondant
+    // (avant : il fallait aussi le faire dans l'onglet Utilisateurs)
+    await db('users').where({ guest_fingerprint: req.params.fp }).update({
+      is_banned: false, ban_reason: null, ban_expires_at: null,
+    });
+    res.json({ success: true, ip_auto_ban_lifted: result.ipAutoBanLifted });
   } catch { res.status(500).json({ error: 'INTERNAL_ERROR' }); }
 });
 

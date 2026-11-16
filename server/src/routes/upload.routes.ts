@@ -16,8 +16,9 @@ import express, { Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
-import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
 import { requireAuth } from '../middleware/auth.middleware';
+import { rateLimit } from '../middleware/rateLimit.middleware';
 import { db } from '../config/database';
 
 // ─── Sharp (optionnel) ───────────────────────────────────────────────────────
@@ -76,12 +77,29 @@ const makeStorage = (dest: string) =>
   multer.diskStorage({
     destination: (_req, _file, cb) => cb(null, dest),
     filename: (_req, file, cb) => {
-      const ext = path.extname(file.originalname).toLowerCase().replace(/[^a-z0-9.]/g, '');
-      cb(null, `${uuidv4()}${ext || '.bin'}`);
+      // 🔐 Nom 100 % généré par le serveur ; l'extension sera revalidée après réception
+      const ext = path.extname(file.originalname).toLowerCase().replace(/[^a-z0-9.]/g, '').slice(0, 11);
+      cb(null, `${crypto.randomUUID()}${ext || '.bin'}`);
     },
   });
 
 const IMAGE_MIME_TYPES = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
+
+// 🔐 Formats d'image réellement acceptés, détectés à partir du CONTENU (pas du nom ni du type déclaré)
+const IMAGE_FORMAT_EXT: Record<string, string> = { jpeg: '.jpg', png: '.png', webp: '.webp', gif: '.gif' };
+
+// 🔐 Fichiers premium : liste blanche d'extensions. Exclus volontairement : html, htm, svg, xml,
+// js, mjs, xhtml, php, exe, bat, cmd, ps1, msi, scr… (exécutables ou interprétés par le navigateur)
+const FILE_EXT_ALLOWLIST = new Set([
+  '.pdf', '.txt', '.md', '.csv', '.rtf',
+  '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp',
+  '.zip', '.7z', '.rar', '.tar', '.gz',
+  '.jpg', '.jpeg', '.png', '.gif', '.webp',
+  '.mp3', '.wav', '.ogg', '.m4a', '.flac',
+  '.mp4', '.webm', '.mov', '.mkv',
+]);
+
+function safeUnlink(p: string) { try { fs.unlinkSync(p); } catch { /* déjà supprimé */ } }
 
 const uploadImageMiddleware = multer({
   storage: makeStorage(IMAGE_DIR),
@@ -105,7 +123,7 @@ function readableSize(bytes: number): string {
 }
 
 // ─── POST /api/upload/image ─────────────────────────────────────────────────
-router.post('/image', requireAuth, (req: Request, res: Response) => {
+router.post('/image', requireAuth, rateLimit({ name: 'upload', max: 30, windowSeconds: 600, by: 'user' }), (req: Request, res: Response) => {
   uploadImageMiddleware.single('file')(req, res, async (err) => {  // ← async ici
     if (err instanceof multer.MulterError) {
       if (err.code === 'LIMIT_FILE_SIZE') {
@@ -119,7 +137,7 @@ router.post('/image', requireAuth, (req: Request, res: Response) => {
     // ⭐ Vérification tier : invités non autorisés (cahier des charges : image = B+C seulement)
     const tier = (req as any).user?.tier || 'guest';
     if (tier === 'guest') {
-      fs.unlinkSync(req.file.path);
+      safeUnlink(req.file.path);
       return res.status(403).json({
         error: 'FORBIDDEN',
         message: 'Le partage de médias est réservé aux membres inscrits.',
@@ -128,7 +146,7 @@ router.post('/image', requireAuth, (req: Request, res: Response) => {
     const maxBytes = tier === 'premium' ? 25 * 1024 * 1024 : 5 * 1024 * 1024;
 
     if (req.file.size > maxBytes) {
-      fs.unlinkSync(req.file.path);
+      safeUnlink(req.file.path);
       const limit = tier === 'premium' ? '25 Mo' : '5 Mo';
       return res.status(400).json({
         error: `Image trop volumineuse. Limite pour votre abonnement : ${limit}.`,
@@ -136,40 +154,65 @@ router.post('/image', requireAuth, (req: Request, res: Response) => {
       });
     }
 
-    // ⭐ Compression Sharp → WebP (paramètres depuis admin/app_settings)
-    let finalFilename = req.file.filename;
-    let finalSize     = req.file.size;
+    // 🔐 Vérifier que le fichier est RÉELLEMENT une image (analyse du contenu par Sharp).
+    // Avant : seul le type annoncé par le navigateur était contrôlé et, si la compression
+    // échouait, l'original était gardé avec son extension → un « .html » déguisé en image
+    // pouvait être servi depuis le domaine de l'app (vol de session).
+    if (!sharp) {
+      safeUnlink(req.file.path);
+      return res.status(503).json({ error: 'Traitement d\'image indisponible sur le serveur.' });
+    }
+    let format: string | undefined;
+    try {
+      format = (await sharp(req.file.path, { limitInputPixels: 100_000_000 }).metadata()).format;
+    } catch { format = undefined; }
+    if (!format || !IMAGE_FORMAT_EXT[format]) {
+      safeUnlink(req.file.path);
+      return res.status(400).json({ error: 'Fichier image invalide. Formats acceptés : JPG, PNG, GIF, WEBP' });
+    }
 
+    const baseName = req.file.filename.replace(/\.[^.]+$/, '');
     const cs = await getCompressionSettings();
     const maxPx = tier === 'premium' ? cs.maxPxPremium : cs.maxPx;
 
-    if (sharp && cs.enabled && req.file.mimetype !== 'image/gif') {
-      // Les GIFs animés ne sont pas recompressés (Sharp perd l'animation)
+    let finalFilename: string;
+    let finalMime: string;
+    let compressed = false;
+
+    if (cs.enabled && format !== 'gif') {
+      // ⭐ Compression Sharp → WebP (les GIF animés ne sont pas recompressés : Sharp perd l'animation)
+      finalFilename = `${baseName}.webp`;
+      finalMime = 'image/webp';
       try {
-        const webpFilename = `${req.file.filename.replace(/\.[^.]+$/, '')}.webp`;
-        const webpPath     = path.join(IMAGE_DIR, webpFilename);
-        await compressImage(req.file.path, webpPath, maxPx, cs.quality);
-        fs.unlinkSync(req.file.path);
-        finalFilename = webpFilename;
-        finalSize     = fs.statSync(webpPath).size;
+        await compressImage(req.file.path, path.join(IMAGE_DIR, finalFilename), maxPx, cs.quality);
+        compressed = true;
       } catch {
-        // Compression échouée → conserver l'original
+        safeUnlink(req.file.path);
+        safeUnlink(path.join(IMAGE_DIR, finalFilename));
+        return res.status(400).json({ error: 'Image illisible ou corrompue.' });
       }
+      safeUnlink(req.file.path);
+    } else {
+      // Pas de compression : on garde l'original MAIS avec l'extension du format détecté
+      finalFilename = `${baseName}${IMAGE_FORMAT_EXT[format]}`;
+      finalMime = format === 'jpeg' ? 'image/jpeg' : `image/${format}`;
+      fs.renameSync(req.file.path, path.join(IMAGE_DIR, finalFilename));
     }
+    const finalSize = fs.statSync(path.join(IMAGE_DIR, finalFilename)).size;
 
     res.json({
       url: `/uploads/images/${finalFilename}`,
       filename: req.file.originalname,
       size: finalSize,
       size_readable: readableSize(finalSize),
-      mimetype: sharp && req.file.mimetype !== 'image/gif' ? 'image/webp' : req.file.mimetype,
-      compressed: !!(sharp && req.file.mimetype !== 'image/gif'),
+      mimetype: finalMime,
+      compressed,
     });
   });
 });
 
 // ─── POST /api/upload/file ──────────────────────────────────────────────────
-router.post('/file', requireAuth, (req: Request, res: Response) => {
+router.post('/file', requireAuth, rateLimit({ name: 'upload', max: 30, windowSeconds: 600, by: 'user' }), (req: Request, res: Response) => {
   // Vérification tier avant même d'accepter le fichier
   const tier = (req as any).user?.tier || 'registered';
   if (tier !== 'premium') {
@@ -188,6 +231,13 @@ router.post('/file', requireAuth, (req: Request, res: Response) => {
     }
     if (err) return res.status(400).json({ error: err.message });
     if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu.' });
+
+    // 🔐 Liste blanche d'extensions (pas de .html/.svg/.js… servis depuis notre domaine)
+    const ext = path.extname(req.file.filename).toLowerCase();
+    if (!FILE_EXT_ALLOWLIST.has(ext)) {
+      safeUnlink(req.file.path);
+      return res.status(400).json({ error: `Type de fichier non autorisé (${ext || 'sans extension'}).` });
+    }
 
     res.json({
       url: `/uploads/files/${req.file.filename}`,

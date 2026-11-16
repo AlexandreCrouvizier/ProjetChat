@@ -10,11 +10,15 @@
  */
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { db } from '../config/database';
 import { env } from '../config/env';
 
 // Le secret pour les admin tokens est différent du JWT principal
-const ADMIN_JWT_SECRET = (env as any).ADMIN_JWT_SECRET || env.JWT_SECRET + '_admin_panel';
+// 🔐 SÉCURITÉ : l'ancienne valeur (env.JWT_SECRET + '_admin_panel') valait la chaîne publique
+// "undefined_admin_panel" (env.JWT_SECRET n'existe pas) → tokens admin falsifiables, TOTP contournable.
+const ADMIN_JWT_SECRET = env.ADMIN_JWT_SECRET
+  || crypto.createHmac('sha256', env.JWT_ACCESS_SECRET).update('chatapp-admin-panel').digest('hex');
 
 /**
  * Vérifie que l'utilisateur authentifié est superadmin en BDD
@@ -53,7 +57,7 @@ export async function requireAdminToken(req: Request, res: Response, next: NextF
       return;
     }
 
-    const decoded = jwt.verify(adminToken, ADMIN_JWT_SECRET) as { userId: string; isAdmin: boolean };
+    const decoded = jwt.verify(adminToken, ADMIN_JWT_SECRET, { algorithms: ['HS256'] }) as { userId: string; isAdmin: boolean };
 
     if (!decoded.isAdmin || decoded.userId !== req.user?.userId) {
       res.status(403).json({ error: 'INVALID_ADMIN_TOKEN', message: 'Token admin invalide' });

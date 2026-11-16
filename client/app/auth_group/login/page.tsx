@@ -77,7 +77,10 @@ export default function LoginPage() {
 
   const handleGuest = async () => {
     setLoading(true);
-    try { await loginAsGuest(); } catch { setError('Erreur'); }
+    try { await loginAsGuest(); } catch (err: any) {
+      // Afficher la vraie raison (ex. « Accès suspendu jusqu'au … Motif : … ») au lieu de « Erreur »
+      setError(err.response?.data?.message || 'Connexion invité impossible. Réessayez dans un instant.');
+    }
     setLoading(false);
   };
 

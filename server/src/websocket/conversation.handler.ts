@@ -2,6 +2,7 @@
  * websocket/conversation.handler.ts — FIXED: unhide la conv quand un message arrive
  */
 import { Server as SocketIOServer } from 'socket.io';
+import { AppError } from '../utils/errors';
 import type { AuthenticatedSocket } from './index';
 import { messageService } from '../services/message.service';
 import { conversationRepository } from '../repositories/conversation.repository';
@@ -16,7 +17,7 @@ export function registerConversationHandlers(io: SocketIOServer, socket: Authent
       if (!isParticipant) { callback?.({ success: false, error: 'Non participant' }); return; }
       socket.join(`conv:${data.conversation_id}`);
       callback?.({ success: true });
-    } catch (error: any) { callback?.({ success: false, error: error.message }); }
+    } catch (error: any) { callback?.({ success: false, error: publicError(error) }); }
   });
 
   socket.on('dm:send', async (data: {
@@ -66,12 +67,14 @@ export function registerConversationHandlers(io: SocketIOServer, socket: Authent
       callback?.({ success: true, message });
     } catch (error: any) {
       console.error(`⚠️ [WS] dm:send erreur (${username}):`, error.message);
-      callback?.({ success: false, error: error.message });
+      callback?.({ success: false, error: publicError(error) });
     }
   });
 
   socket.on('conversation:read', async (data: { conversation_id: string }) => {
     try {
+      // 🔐 Seul un participant peut marquer la conversation comme lue (évite les faux accusés de lecture)
+      if (!data?.conversation_id || !(await conversationRepository.isParticipant(data.conversation_id, userId))) return;
       await conversationRepository.markAsRead(data.conversation_id, userId);
       const other = await conversationRepository.getOtherParticipant(data.conversation_id, userId);
       if (other) {
@@ -81,4 +84,9 @@ export function registerConversationHandlers(io: SocketIOServer, socket: Authent
       }
     } catch (error: any) { console.error(`⚠️ conversation:read erreur:`, error.message); }
   });
+}
+
+/** 🔐 Seules nos erreurs métier (AppError) sont montrées au client ; le reste reste dans les logs serveur */
+function publicError(error: any): string {
+  return error instanceof AppError ? error.message : 'Erreur serveur';
 }

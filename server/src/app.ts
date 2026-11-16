@@ -73,8 +73,20 @@ app.get('/api/settings/members', async (_req, res) => {
 });
 
 // ⭐ Phase 4.1 : Fichiers uploadés servis statiquement
+// 🔐 Les fichiers envoyés par les utilisateurs ne doivent JAMAIS pouvoir s'exécuter
+// dans l'origine de l'application (sinon un .html/.svg piégé vole les sessions) :
+//   - nosniff : le navigateur respecte le type déclaré
+//   - CSP sandbox : aucun script, même si un fichier HTML passait au travers
+//   - attachment : les fichiers (hors images) sont téléchargés, jamais affichés
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
-  maxAge: '7d', etag: true,
+  maxAge: '7d', etag: true, dotfiles: 'deny', index: false, redirect: false,
+  setHeaders: (res, filePath) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('Content-Security-Policy', "default-src 'none'; img-src 'self'; media-src 'self'; sandbox");
+    if (filePath.includes(`${path.sep}files${path.sep}`)) {
+      res.setHeader('Content-Disposition', 'attachment');
+    }
+  },
 }));
 
 // ⭐ Phase 4.1 : Routes upload image/fichier

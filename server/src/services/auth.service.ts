@@ -20,11 +20,32 @@ import { userRepository } from '../repositories/user.repository';
 import { sessionRepository } from '../repositories/session.repository';
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { logAudit } from '../middleware/audit.middleware';
-import { BadRequestError, UnauthorizedError, ValidationError } from '../utils/errors';
+import { BadRequestError, UnauthorizedError, ValidationError, RateLimitError } from '../utils/errors';
 import { VALIDATION } from '../../../shared/constants';
+import { hitLimit, resetLimit } from '../middleware/rateLimit.middleware';
+import { isBanActive } from './accessRevocation.service';
 
 // Nombre de rounds bcrypt (12 = bon compromis sécurité/performance)
 const BCRYPT_ROUNDS = 12;
+
+// 🔐 Hash factice : quand l'email n'existe pas, on fait quand même un bcrypt.compare
+// pour que le temps de réponse ne révèle pas si un compte existe.
+const DUMMY_HASH = bcrypt.hashSync('chatapp-timing-equalizer', BCRYPT_ROUNDS);
+
+/** Normalise et valide grossièrement un email (type + format + longueur) */
+function normalizeEmail(email: unknown): string {
+  if (typeof email !== 'string') throw new ValidationError('Email invalide', 'email');
+  const e = email.trim().toLowerCase();
+  if (e.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw new ValidationError('Email invalide', 'email');
+  return e;
+}
+
+function assertString(value: unknown, field: string, max = 200): string {
+  if (typeof value !== 'string' || value.length === 0 || value.length > max) {
+    throw new ValidationError(`Champ ${field} invalide`, field);
+  }
+  return value;
+}
 
 export const authService = {
 
@@ -39,7 +60,10 @@ export const authService = {
     ip: string;
     userAgent?: string;
   }) {
-    // 1. Validations
+    // 1. Validations (🔐 types stricts : le body JSON peut contenir n'importe quoi)
+    data.username = assertString(data.username, 'username', 50);
+    data.password = assertString(data.password, 'password', 200);
+    data.email = normalizeEmail(data.email);
     if (!VALIDATION.username.pattern.test(data.username)) {
       throw new ValidationError('Le pseudo ne peut contenir que des lettres, chiffres, - et _', 'username');
     }
@@ -94,28 +118,34 @@ export const authService = {
     ip: string;
     userAgent?: string;
   }) {
-    // 1. Trouver l'utilisateur par email
-    const user = await userRepository.findByEmail(data.email);
-    if (!user || !user.password_hash) {
-      // Message volontairement vague (sécurité : ne pas révéler si l'email existe)
+    const email = normalizeEmail(data.email);
+    const password = assertString(data.password, 'password', 200);
+
+    // 🔐 Anti brute-force par compte (en plus de la limite par IP sur la route)
+    const emailLimit = await hitLimit(`login-email:${email}`, 10, 900);
+    if (!emailLimit.allowed) {
+      throw new RateLimitError(`Trop de tentatives sur ce compte. Réessayez dans ${Math.ceil(emailLimit.retryAfter / 60)} min.`);
+    }
+
+    // 1. Trouver l'utilisateur par email (insensible à la casse)
+    const user = await userRepository.findByEmail(email);
+
+    // 2. Vérifier le mot de passe — TOUJOURS un bcrypt.compare (temps constant)
+    const isValid = await bcrypt.compare(password, user?.password_hash || DUMMY_HASH);
+    if (!user || !user.password_hash || !isValid) {
+      if (user) await logAudit('login_failed', data.ip, user.id, { reason: 'invalid_password' }, data.userAgent);
+      // Message volontairement vague (ne pas révéler si l'email existe)
       throw new UnauthorizedError('Email ou mot de passe incorrect');
     }
 
-    // 2. Vérifier si banni
-    if (user.is_banned) {
+    // 3. Vérifier le bannissement APRÈS le mot de passe (sinon on révèle qu'un compte existe et est banni)
+    if (isBanActive(user)) {
       const msg = user.ban_expires_at
         ? `Compte suspendu jusqu'au ${new Date(user.ban_expires_at).toLocaleDateString('fr-FR')}`
         : 'Compte suspendu définitivement';
       throw new UnauthorizedError(msg);
     }
-
-    // 3. Vérifier le mot de passe
-    const isValid = await bcrypt.compare(data.password, user.password_hash);
-    if (!isValid) {
-      // Log la tentative échouée (LCEN + détection brute force)
-      await logAudit('login_failed', data.ip, user.id, { reason: 'invalid_password' }, data.userAgent);
-      throw new UnauthorizedError('Email ou mot de passe incorrect');
-    }
+    await resetLimit(`login-email:${email}`);
 
     // 4. Mettre à jour last_seen et last_ip
     await userRepository.update(user.id, {
@@ -151,10 +181,11 @@ export const authService = {
       // Fingerprint banni ?
       const fpCheck = await guestSecurityService.isFingerprintBanned(data.fingerprint);
       if (fpCheck.banned) {
-        throw new ValidationError(
-          fpCheck.permanent ? 'Accès définitivement refusé.' : 'Accès temporairement refusé.',
-          'fingerprint'
-        );
+        // Message explicite pour l'utilisateur : durée + motif (le motif est déjà montré au moment du ban)
+        const until = fpCheck.expiresAt
+          ? `jusqu'au ${fpCheck.expiresAt.toLocaleString('fr-FR', { timeZone: 'Europe/Paris', dateStyle: 'short', timeStyle: 'short' })}`
+          : 'définitivement';
+        throw new ValidationError(`Accès suspendu ${until}. Motif : ${fpCheck.reason}`, 'fingerprint');
       }
     }
 
@@ -209,6 +240,18 @@ export const authService = {
 
     // ── 2. Nouvel invité — générer un username unique ──────────────────────
     let username = data.username;
+
+    // 🔐 Pseudo choisi par l'invité : mêmes règles que les inscrits
+    if (username !== undefined && username !== null && username !== '') {
+      if (typeof username !== 'string'
+        || !VALIDATION.username.pattern.test(username)
+        || username.length < VALIDATION.username.minLength
+        || username.length > VALIDATION.username.maxLength) {
+        throw new ValidationError('Pseudo invalide (lettres, chiffres, - et _ uniquement)', 'username');
+      }
+    } else {
+      username = undefined;
+    }
 
     if (!username) {
       const counter = await redis.incr('guest:username_counter');
@@ -284,6 +327,12 @@ export const authService = {
     const user = await userRepository.findById(payload.userId);
     if (!user) {
       throw new UnauthorizedError('Utilisateur introuvable');
+    }
+
+    // 🔐 Un utilisateur banni ne peut plus renouveler ses tokens
+    if (isBanActive(user)) {
+      await sessionRepository.deleteAllForUser(user.id);
+      throw new UnauthorizedError('Compte suspendu');
     }
 
     // 4. Supprimer l'ancienne session (rotation du refresh token)

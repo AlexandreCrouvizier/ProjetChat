@@ -4,6 +4,7 @@
 import type { Request, Response } from 'express';
 import { groupRepository } from '../repositories/group.repository';
 import { invitationRepository } from '../repositories/invitation.repository';
+import { canReadGroup } from '../services/access.service';
 import { VALIDATION, TIER_LIMITS } from '../../../shared/constants';
 
 export const groupsController = {
@@ -42,7 +43,10 @@ export const groupsController = {
   async get(req: Request, res: Response): Promise<void> {
     try {
       const group = await groupRepository.findById(req.params.id);
-      if (!group) { res.status(404).json({ error: 'NOT_FOUND', message: 'Salon introuvable' }); return; }
+      // 🔐 Salon privé → invisible pour les non-membres
+      if (!group || !(await canReadGroup(group, req.user?.userId))) {
+        res.status(404).json({ error: 'NOT_FOUND', message: 'Salon introuvable' }); return;
+      }
 
       let isMember = false;
       let myRole = null;
@@ -176,6 +180,11 @@ export const groupsController = {
   /** GET /api/groups/:id/members */
   async members(req: Request, res: Response): Promise<void> {
     try {
+      // 🔐 Liste des membres d'un salon privé → membres uniquement
+      const group = await groupRepository.findById(req.params.id);
+      if (!group || !(await canReadGroup(group, req.user?.userId))) {
+        res.status(404).json({ error: 'NOT_FOUND', message: 'Salon introuvable' }); return;
+      }
       const members = await groupRepository.getMembers(req.params.id);
       res.json({ members });
     } catch (error: any) {
