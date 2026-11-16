@@ -54,6 +54,24 @@ app.get('/api/settings/gif-display', async (_req, res) => {
   }
 });
 
+// ⭐ Phase 4.1g : paramètres de la liste des membres (publics, pas d'auth)
+// Route perdue lors d'un patch précédent d'app.ts — utilisée par MembersPanel.tsx
+app.get('/api/settings/members', async (_req, res) => {
+  try {
+    const rows = await db('app_settings')
+      .whereIn('key', ['members_hide_offline_guests', 'members_offline_ttl_minutes'])
+      .select('key', 'value');
+    const map: Record<string, string> = {};
+    for (const r of rows) map[r.key] = r.value;
+    res.json({
+      hide_offline_guests: map['members_hide_offline_guests'] === 'true',
+      offline_ttl_minutes: parseInt(map['members_offline_ttl_minutes'] ?? '10', 10) || 10,
+    });
+  } catch {
+    res.json({ hide_offline_guests: false, offline_ttl_minutes: 10 });
+  }
+});
+
 // ⭐ Phase 4.1 : Fichiers uploadés servis statiquement
 app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
   maxAge: '7d', etag: true,
