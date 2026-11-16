@@ -1,11 +1,10 @@
 /**
- * websocket/message.handler.ts — FIXED: thread replies broadcast séparément
- * 
- * Si parent_message_id est rempli → c'est une réponse de thread
- *   → broadcast "thread:new_reply" (pas "message:new")
- *   → le flux principal ne reçoit PAS ce message
- *   → seul le ThreadView ouvert le reçoit
- *   → le compteur thread_count du message parent est incrémenté via "thread:count_update"
+ * websocket/message.handler.ts — Phase 4.1 : support médias (image, file, gif)
+ *
+ * L'événement message:send accepte maintenant :
+ *   type?     : 'text' | 'image' | 'file' | 'gif' (défaut 'text')
+ *   file_url? : URL serveur pour les types image/file
+ *   gif_url?  : URL Tenor pour le type gif
  */
 import { Server as SocketIOServer } from 'socket.io';
 import type { AuthenticatedSocket } from './index';
@@ -22,15 +21,21 @@ export function registerMessageHandlers(io: SocketIOServer, socket: Authenticate
     group_id: string;
     reply_to_id?: string;
     parent_message_id?: string;
+    type?: string;
+    file_url?: string;
+    gif_url?: string;
   }, callback?: (response: any) => void) => {
     try {
       const message = await messageService.sendMessage({
-        content: data.content,
+        content: data.content || '',
         authorId: userId,
         groupId: data.group_id,
         tier,
         replyToId: data.reply_to_id,
         parentMessageId: data.parent_message_id,
+        type: data.type || 'text',
+        fileUrl: data.file_url,
+        gifUrl: data.gif_url,
         ip,
       });
 

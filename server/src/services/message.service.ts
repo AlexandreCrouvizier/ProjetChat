@@ -1,9 +1,11 @@
 /**
- * services/message.service.ts — FIXED: sendMessage retourne un message formaté identique à getGroupMessages
- * 
- * Le bug "Inconnu" venait du fait que sendMessage retournait les champs plats
- * (author_username, author_tier...) alors que le frontend attend un objet
- * author: { id, username, tier... }. Maintenant le formatage est uniforme.
+ * services/message.service.ts — Phase 4.1 : support médias (image, file, gif, link preview)
+ *
+ * Ajouts :
+ *   - formatMessage : champs file_url, gif_url, link_preview
+ *   - sendMessage : accepte type, file_url, gif_url
+ *                   détecte automatiquement les URLs dans les messages texte
+ *                   et génère un link_preview côté serveur
  */
 
 import { messageRepository } from '../repositories/message.repository';
@@ -12,6 +14,7 @@ import { reactionRepository } from '../repositories/reaction.repository';
 import { conversationRepository } from '../repositories/conversation.repository';
 import { userRepository } from '../repositories/user.repository';
 import { moderationService } from './moderation.service';
+import { linkPreviewService } from './linkPreview.service';
 import { checkRateLimit } from '../middleware/rateLimit.middleware';
 import { logAudit } from '../middleware/audit.middleware';
 import { BadRequestError, ForbiddenError, RateLimitError } from '../utils/errors';
@@ -38,6 +41,10 @@ function formatMessage(msg: any, options?: { reactions?: any[]; replyTo?: any; t
     parent_message_id: msg.parent_message_id || null,
     reply_to_id: msg.reply_to_id || null,
     type: msg.type || 'text',
+    // ⭐ Phase 4.1 — Médias
+    file_url: msg.file_url || null,
+    gif_url: msg.gif_url || null,
+    link_preview: msg.link_preview || null,
     is_pinned: msg.is_pinned || false,
     edited_at: msg.edited_at || null,
     created_at: msg.created_at,
@@ -58,14 +65,24 @@ export const messageService = {
     tier: string;
     parentMessageId?: string;
     replyToId?: string;
+    type?: string;
+    fileUrl?: string;
+    gifUrl?: string;
     ip: string;
   }) {
-    if (!data.content || data.content.trim().length === 0) {
+    const messageType = data.type || 'text';
+
+    // Validation contenu : obligatoire sauf pour image/gif/file
+    if (messageType === 'text' && (!data.content || data.content.trim().length === 0)) {
       throw new BadRequestError('Le message ne peut pas être vide');
     }
-    if (data.content.length > VALIDATION.message.maxLength) {
+    if (data.content && data.content.length > VALIDATION.message.maxLength) {
       throw new BadRequestError(`Le message ne peut pas dépasser ${VALIDATION.message.maxLength} caractères`);
     }
+    // Validation présence du média selon le type
+    if (messageType === 'image' && !data.fileUrl) throw new BadRequestError('URL image manquante');
+    if (messageType === 'file'  && !data.fileUrl) throw new BadRequestError('URL fichier manquante');
+    if (messageType === 'gif'   && !data.gifUrl)  throw new BadRequestError('URL GIF manquante');
 
     const allowed = await checkRateLimit(data.authorId, data.tier);
     if (!allowed) {
@@ -138,18 +155,41 @@ export const messageService = {
     }
 
     const message = await messageRepository.create({
-      content: data.content.trim(),
+      content: data.content ? data.content.trim() : '',
       author_id: data.authorId,
       group_id: data.groupId || undefined,
       conversation_id: data.conversationId || undefined,
       parent_message_id: data.parentMessageId,
       reply_to_id: data.replyToId,
-      type: 'text',
+      type: messageType,
+      file_url: data.fileUrl || undefined,
+      gif_url: data.gifUrl || undefined,
       ip_address: data.ip,
     });
 
     if (data.groupId) await groupRepository.updateLastMessage(data.groupId);
     if (data.conversationId) await conversationRepository.updateLastMessage(data.conversationId);
+
+    // ⭐ Détection link preview pour les messages texte (asynchrone, ne bloque pas)
+    let linkPreview = null;
+    if (messageType === 'text' && data.content) {
+      const detectedUrl = linkPreviewService.detectUrl(data.content);
+      if (detectedUrl) {
+        // Fire-and-forget : on tente de générer la preview en arrière-plan
+        // On attend max 4s pour ne pas trop retarder la réponse socket
+        try {
+          const previewPromise = linkPreviewService.fetchPreview(detectedUrl);
+          const timeoutPromise = new Promise<null>(r => setTimeout(() => r(null), 4000));
+          linkPreview = await Promise.race([previewPromise, timeoutPromise]);
+          if (linkPreview) {
+            // Sauvegarder en BDD
+            await db('messages').where({ id: message.id }).update({
+              link_preview: JSON.stringify(linkPreview),
+            });
+          }
+        } catch { /* Preview optionnelle, ne pas planter */ }
+      }
+    }
 
     // ⭐ Récupérer le message AVEC l'auteur (JOIN users)
     const fullMessage = await messageRepository.findByIdWithAuthor(message.id);
@@ -166,7 +206,7 @@ export const messageService = {
     }
 
     // ⭐ Retourner le message FORMATÉ (avec author: { id, username, ... })
-    return formatMessage(fullMessage, {
+    return formatMessage({ ...fullMessage, link_preview: linkPreview }, {
       reactions: [],
       replyTo: replyToData,
       threadCount: 0,

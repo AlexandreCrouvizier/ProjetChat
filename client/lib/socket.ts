@@ -12,6 +12,13 @@ export function getSocket(): TypedSocket | null {
 export function connectSocket(token: string): TypedSocket {
   if (socket?.connected) return socket;
 
+  // Si un socket existe mais est déconnecté, le détruire proprement avant de recréer
+  if (socket) {
+    socket.removeAllListeners();
+    socket.disconnect();
+    socket = null;
+  }
+
   socket = io(process.env.NEXT_PUBLIC_WS_URL || 'http://localhost:4000', {
     auth: { token },
     transports: ['websocket', 'polling'],
@@ -38,6 +45,11 @@ export function connectSocket(token: string): TypedSocket {
 
 export function disconnectSocket(): void {
   if (socket) {
+    // Désactiver la reconnexion automatique AVANT de déconnecter
+    // Sinon socket.io tente de se reconnecter pendant la navigation vers la page de login
+    socket.io.opts.reconnection = false;
+    socket.io.reconnection(false);
+    socket.removeAllListeners();
     socket.disconnect();
     socket = null;
   }

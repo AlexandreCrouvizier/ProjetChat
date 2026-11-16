@@ -180,7 +180,10 @@ export function ThreadView({ parentMessageId, groupId, currentUserId, currentUse
                   <span className="text-[9px] text-[var(--t3)]">{formatTime(reply.created_at)}</span>
                 </div>
                 <div className="text-[11px] text-[var(--t2)] leading-relaxed break-words">
-                  <MessageContent content={reply.content} currentUsername={currentUsername} />
+                  <MessageContent content={reply.content} type={reply.type}
+                    file_url={(reply as any).file_url} gif_url={(reply as any).gif_url}
+                    link_preview={(reply as any).link_preview}
+                    currentUsername={currentUsername} />
                 </div>
               </div>
 

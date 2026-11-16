@@ -18,6 +18,10 @@ export interface MessageRow {
   parent_message_id: string | null;
   reply_to_id: string | null;
   type: string;
+  // ⭐ Phase 4.1 — Médias
+  file_url: string | null;
+  gif_url: string | null;
+  link_preview: { title: string; description: string; image: string | null; url: string; site_name: string | null } | null;
   is_pinned: boolean;
   is_hidden: boolean;
   ip_address: string;
@@ -162,6 +166,9 @@ export const messageRepository = {
     parent_message_id?: string;
     reply_to_id?: string;
     type?: string;
+    file_url?: string;
+    gif_url?: string;
+    link_preview?: object | null;
     ip_address: string;
   }): Promise<MessageRow> {
     const [message] = await db('messages')
@@ -173,6 +180,9 @@ export const messageRepository = {
         parent_message_id: data.parent_message_id || null,
         reply_to_id: data.reply_to_id || null,
         type: data.type || 'text',
+        file_url: data.file_url || null,
+        gif_url: data.gif_url || null,
+        link_preview: data.link_preview ? JSON.stringify(data.link_preview) : null,
         ip_address: data.ip_address,
       })
       .returning('*');

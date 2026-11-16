@@ -20,6 +20,10 @@ export interface ChatMessage {
   group_id: string | null;
   conversation_id: string | null;
   type: string;
+  // ⭐ Phase 4.1 — Médias
+  file_url: string | null;
+  gif_url: string | null;
+  link_preview: { title: string; description: string; image: string | null; url: string; site_name: string | null } | null;
   is_pinned: boolean;
   is_hidden: boolean;
   reply_to_id: string | null;
@@ -136,17 +140,38 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
       socket.emit('message:send', {
         content: content.trim(),
         group_id: groupId,
-        // Pas de reply_to_id ni parent_message_id ici
       }, (response: any) => {
         if (response.success) resolve(response.message);
         else {
-          // ⭐ Attacher les données enrichies mute à l'erreur pour le caller
           const err: any = new Error(response.error);
-          if (response.muted) {
-            err.muted = true;
-            err.expires_at = response.expires_at;
-            err.reason = response.reason;
-          }
+          if (response.muted) { err.muted = true; err.expires_at = response.expires_at; err.reason = response.reason; }
+          reject(err);
+        }
+      });
+    });
+  }, [groupId]);
+
+  // ⭐ sendMediaMessage : envoie un message de type image, gif ou file
+  const sendMediaMessage = useCallback(async (params: {
+    type: 'image' | 'gif' | 'file';
+    file_url?: string;
+    gif_url?: string;
+    content?: string;
+  }) => {
+    const socket = getSocket();
+    if (!socket || !groupId) return;
+    return new Promise<ChatMessage>((resolve, reject) => {
+      socket.emit('message:send', {
+        content: params.content || '',
+        group_id: groupId,
+        type: params.type,
+        file_url: params.file_url,
+        gif_url: params.gif_url,
+      }, (response: any) => {
+        if (response.success) resolve(response.message);
+        else {
+          const err: any = new Error(response.error);
+          if (response.muted) { err.muted = true; err.expires_at = response.expires_at; err.reason = response.reason; }
           reject(err);
         }
       });
@@ -173,5 +198,5 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
     if (messages.length > 0 && hasMore) loadMessages(messages[0].id);
   }, [messages, hasMore, loadMessages]);
 
-  return { messages, isLoading, hasMore, typingUsers, sendMessage, toggleReaction, emitTyping, loadMore };
+  return { messages, isLoading, hasMore, typingUsers, sendMessage, sendMediaMessage, toggleReaction, emitTyping, loadMore };
 }

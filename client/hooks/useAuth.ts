@@ -11,7 +11,8 @@ import { useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
-import { connectSocket, disconnectSocket } from '@/lib/socket';
+import { connectSocket, disconnectSocket, getSocket } from '@/lib/socket';
+import { getOrCreateFingerprint } from '@/lib/fingerprint';
 
 export function useAuth() {
   const router = useRouter();
@@ -41,7 +42,8 @@ export function useAuth() {
 
   /** Connexion invité */
   const loginAsGuest = useCallback(async (username?: string) => {
-    const { data } = await api.post('/auth/guest', { username });
+    const fingerprint = getOrCreateFingerprint();
+    const { data } = await api.post('/auth/guest', { username, fingerprint });
     localStorage.setItem('access_token', data.access_token);
     setUser(data.user);
     connectSocket(data.access_token);
@@ -55,7 +57,15 @@ export function useAuth() {
       const refreshToken = localStorage.getItem('refresh_token');
       await api.post('/auth/logout', { refresh_token: refreshToken });
     } catch {
-      // Ignore les erreurs de logout (token peut être déjà expiré)
+      // Ignore les erreurs de logout
+    }
+    // ⭐ Émettre user:logout AVANT de déconnecter
+    // Le serveur va : supprimer Redis + mettre last_seen_at = 10min passé + broadcast offline
+    // Grâce au timestamp dans le passé, les polls HTTP du MembersPanel verront offline aussi
+    const currentSocket = getSocket();
+    if (currentSocket?.connected) {
+      currentSocket.emit('user:logout');
+      await new Promise(resolve => setTimeout(resolve, 200));
     }
     disconnectSocket();
     clearUser();
@@ -80,6 +90,14 @@ export function useAuth() {
     }
   }, [setUser, clearUser, setLoading]);
 
+  /** ⭐ Phase 4.1e — Rafraîchir le profil (tier, badges) sans se déconnecter */
+  const refreshUser = useCallback(async () => {
+    try {
+      const { data } = await api.get('/auth/me');
+      setUser(data.user);
+    } catch { /* Silencieux */ }
+  }, [setUser]);
+
   return {
     user,
     isAuthenticated,
@@ -89,5 +107,6 @@ export function useAuth() {
     loginAsGuest,
     logout,
     checkAuth,
+    refreshUser,
   };
 }

@@ -74,10 +74,11 @@ export const authController = {
   /** POST /api/auth/guest */
   async guest(req: Request, res: Response): Promise<void> {
     try {
-      const { username } = req.body;
+      const { username, fingerprint } = req.body;
 
       const result = await authService.loginAsGuest({
         username,
+        fingerprint: typeof fingerprint === 'string' ? fingerprint.substring(0, 80) : undefined,
         ip: getIpFromRequest(req),
         userAgent: req.headers['user-agent'],
       });

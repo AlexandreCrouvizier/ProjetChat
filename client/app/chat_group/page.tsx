@@ -8,7 +8,7 @@
  */
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useChat } from '@/hooks/useChat';
 import type { ChatMessage } from '@/hooks/useChat';
@@ -153,7 +153,6 @@ export default function ChatPage() {
     try { await activeChat.sendMessage(content); }
     catch (err: any) {
       const msg = err.message || '';
-      // ⭐ L'erreur peut porter des données enrichies (expires_at, reason)
       if (msg.includes('muté') || msg.includes('muted') || err.muted) {
         setMuteInfo({
           duration: err.duration || '',
@@ -161,6 +160,17 @@ export default function ChatPage() {
           expires_at: err.expires_at || null,
           admin_message: err.admin_message,
         });
+      } else { alert(msg); }
+    }
+  };
+
+  // ⭐ Phase 4.1 — Envoi d'un média (image, gif, fichier)
+  const handleSendMedia = async (params: { type: 'image' | 'gif' | 'file'; file_url?: string; gif_url?: string; content?: string }) => {
+    try { await activeChat.sendMediaMessage(params); }
+    catch (err: any) {
+      const msg = err.message || '';
+      if (msg.includes('muté') || msg.includes('muted') || err.muted) {
+        setMuteInfo({ duration: '', reason: msg, expires_at: err.expires_at || null });
       } else { alert(msg); }
     }
   };
@@ -182,7 +192,37 @@ export default function ChatPage() {
     refreshBlocked();
   };
 
-  if (authLoading) return <div className="h-screen flex items-center justify-center"><div className="text-[var(--t3)] text-sm">⏳ Chargement...</div></div>;
+  // ⭐ Phase 4.1d — Drag & drop sur toute la fenêtre de chat
+  const [chatDragOver, setChatDragOver] = useState(false);
+  const chatDropRef = useRef<HTMLDivElement>(null);
+
+  const handleChatDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    if (mode === 'group' && activeGroupId) setChatDragOver(true);
+  }, [mode, activeGroupId]);
+
+  const handleChatDragLeave = useCallback((e: React.DragEvent<HTMLDivElement>) => {
+    if (!chatDropRef.current?.contains(e.relatedTarget as Node)) setChatDragOver(false);
+  }, []);
+
+  const handleChatDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    setChatDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (!file || !activeGroupId) return;
+    // Déléguer au handleSendMedia via un event synthétique
+    const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|gif|webp)$/i.test(file.name);
+    if (!isImage && user?.tier !== 'premium') {
+      alert('Le partage de fichiers est réservé aux membres Premium.');
+      return;
+    }
+    try {
+      const { uploadImage, uploadFile } = await import('@/lib/api');
+      const upFn = isImage ? uploadImage : uploadFile;
+      const { url } = await upFn(file);
+      await handleSendMedia({ type: isImage ? 'image' : 'file', file_url: url, content: file.name });
+    } catch (err: any) { alert(err.message || 'Erreur lors de l\'envoi'); }
+  }, [activeGroupId, user?.tier, handleSendMedia]);
 
   return (
     <div className="h-screen flex p-3 gap-2.5">
@@ -192,7 +232,22 @@ export default function ChatPage() {
         onLeaveGroup={handleLeaveGroup} onLogout={logout} onEditProfile={() => setShowEditProfile(true)}
         onCreateGroup={() => setShowCreateGroup(true)} />
 
-      <div className="flex-1 glass rounded-2xl flex flex-col overflow-hidden">
+      <div
+        ref={chatDropRef}
+        className="flex-1 glass rounded-2xl flex flex-col overflow-hidden relative"
+        onDragOver={handleChatDragOver}
+        onDragLeave={handleChatDragLeave}
+        onDrop={handleChatDrop}
+      >
+        {/* Overlay drag & drop pleine fenêtre */}
+        {chatDragOver && (
+          <div className="absolute inset-0 z-30 flex flex-col items-center justify-center pointer-events-none rounded-2xl"
+            style={{ background: 'rgba(139,92,246,0.10)', border: '2px dashed rgba(139,92,246,0.6)' }}>
+            <span className="text-5xl mb-3">📎</span>
+            <p className="text-lg font-semibold" style={{ color: '#a78bfa' }}>Déposer pour envoyer</p>
+            <p className="text-sm mt-1" style={{ color: 'rgba(167,139,250,0.6)' }}>Images JPG, PNG, GIF, WEBP</p>
+          </div>
+        )}
         <div className="px-5 py-3.5 border-b border-[var(--border)] flex items-center gap-2.5">
           {mode === 'group' ? <span className="text-xl font-bold text-[var(--hash)]" style={{ textShadow: '0 0 14px var(--acc-g)' }}>#</span> : <span className="text-xl">💬</span>}
           <span className="text-[15px] font-semibold">{(mode === 'group' ? activeGroupName : activeConvName) || 'Sélectionnez un salon'}</span>
@@ -215,10 +270,12 @@ export default function ChatPage() {
           </div>
         )}
 
-        <MessageInput onSend={handleSendMessage} onTyping={mode === 'group' ? groupChat.emitTyping : () => {}}
+        <MessageInput onSend={handleSendMessage} onSendMedia={handleSendMedia}
+          onTyping={mode === 'group' ? groupChat.emitTyping : () => {}}
           channelName={mode === 'group' ? activeGroupName : activeConvName}
           disabled={mode === 'group' ? !activeGroupId : !activeConvId}
-          groupId={mode === 'group' ? activeGroupId : null} />
+          groupId={mode === 'group' ? activeGroupId : null}
+          currentTier={user?.tier || 'guest'} />
       </div>
 
       {mode === 'group' && <MembersPanel groupId={activeGroupId} groupType={groups.find(g => g.id === activeGroupId)?.type} groupName={activeGroupName} onMemberClick={handleAvatarClick} />}

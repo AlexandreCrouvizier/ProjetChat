@@ -11,7 +11,7 @@ export const profileController = {
   async updateProfile(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.user!.userId;
-      const { username, bio, theme } = req.body;
+      const { username, bio, theme, gif_display } = req.body;
       const updates: Record<string, any> = {};
 
       if (username !== undefined) {
@@ -40,6 +40,13 @@ export const profileController = {
         updates.theme = theme;
       }
 
+      // Préférence d'affichage des GIFs (null = suit la règle admin du tier)
+      if (gif_display !== undefined) {
+        if (gif_display === null || gif_display === 'auto' || gif_display === 'click') {
+          updates.gif_display = gif_display;
+        }
+      }
+
       if (Object.keys(updates).length === 0) {
         res.status(400).json({ error: 'VALIDATION_ERROR', message: 'Aucune modification' });
         return;
@@ -54,6 +61,7 @@ export const profileController = {
           tier: user.tier, avatar_url: user.avatar_url, bio: user.bio,
           donor_badge: user.donor_badge, theme: user.theme,
           status_text: user.status_text, status_emoji: user.status_emoji,
+          gif_display: (user as any).gif_display ?? null,
         },
       });
     } catch (error: any) {

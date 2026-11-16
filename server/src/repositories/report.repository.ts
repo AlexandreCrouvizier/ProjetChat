@@ -88,6 +88,9 @@ export const reportRepository = {
         'messages.content as message_content',
         'messages.is_hidden as message_is_hidden',
         'messages.parent_message_id as message_parent_id',
+        'messages.file_url as message_file_url',
+        'messages.gif_url as message_gif_url',
+        'messages.type as message_type',
         'groups.name as group_name',
       )
       .orderBy('reports.created_at', 'desc');
@@ -113,6 +116,9 @@ export const reportRepository = {
           message_content: report.message_content,
           message_is_hidden: report.message_is_hidden,
           message_parent_id: report.message_parent_id,
+          message_file_url: report.message_file_url || null,
+          message_gif_url: report.message_gif_url || null,
+          message_type: report.message_type || 'text',
           status: report.status,
           // Tous les report_ids associés (pour agir d'un coup)
           report_ids: [],

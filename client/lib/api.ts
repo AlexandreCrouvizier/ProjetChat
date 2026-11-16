@@ -56,4 +56,33 @@ api.interceptors.response.use(
   }
 );
 
+// ⭐ Phase 4.1 — Upload d'images et fichiers
+export async function uploadImage(file: File): Promise<{ url: string; filename: string; size: number; size_readable: string }> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch('/api/upload/image', {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Erreur upload image');
+  return data;
+}
+
+export async function uploadFile(file: File): Promise<{ url: string; filename: string; size: number; size_readable: string; mimetype: string }> {
+  const token = typeof window !== 'undefined' ? localStorage.getItem('access_token') : null;
+  const formData = new FormData();
+  formData.append('file', file);
+  const res = await fetch('/api/upload/file', {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Erreur upload fichier');
+  return data;
+}
+
 export default api;

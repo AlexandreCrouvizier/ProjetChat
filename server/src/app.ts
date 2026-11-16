@@ -13,6 +13,9 @@ import conversationsRoutes from './routes/conversations.routes';
 import usersRoutes from './routes/users.routes';
 import moderationRoutes from './routes/moderation.routes';
 import adminRouter, { adminAuthRouter } from './routes/admin.routes';
+import uploadRoutes from './routes/upload.routes';
+import path from 'path';
+import { db } from './config/database';
 
 const app = express();
 app.use(helmet());
@@ -31,6 +34,33 @@ app.use('/api/groups', groupsRoutes);
 app.use('/api/conversations', conversationsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/moderation', moderationRoutes);
+// ⭐ Phase 4 : paramètres d'affichage GIF (publics, pas d'auth)
+app.get('/api/settings/gif-display', async (_req, res) => {
+  try {
+    const rows = await db('app_settings')
+      .whereIn('key', ['gif_display_guest', 'gif_display_registered', 'gif_display_premium', 'gif_picker_limit'])
+      .select('key', 'value');
+    const map: Record<string, string> = {};
+    for (const r of rows) map[r.key] = r.value;
+    res.json({
+      guest:      map['gif_display_guest']      ?? 'masked',
+      registered: map['gif_display_registered'] ?? 'option',
+      premium:    map['gif_display_premium']    ?? 'visible',
+      limit:      parseInt(map['gif_picker_limit'] ?? '20', 10),
+    });
+  } catch {
+    res.json({ guest: 'masked', registered: 'option', premium: 'visible', limit: 20 });
+  }
+});
+
+// ⭐ Phase 4.1 : Fichiers uploadés servis statiquement
+app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
+  maxAge: '7d', etag: true,
+}));
+
+// ⭐ Phase 4.1 : Routes upload image/fichier
+app.use('/api/upload', uploadRoutes);
+
 app.use('/api/admin-auth', adminAuthRouter);  // ⭐ TOTP setup/verify
 app.use('/api/admin', adminRouter);            // ⭐ Dashboard admin (post-TOTP)
 

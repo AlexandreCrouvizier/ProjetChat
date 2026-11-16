@@ -44,7 +44,43 @@ function clearToken() {
 
 // ─── Types ────────────────────────────────────────────────────────
 type Screen = 'loading' | 'login' | 'denied' | 'setup' | 'verify' | 'dashboard';
-type Tab = 'stats' | 'moderation' | 'users' | 'groups';
+type Tab = 'stats' | 'moderation' | 'users' | 'groups' | 'settings' | 'security';
+
+// ─── Composant : aperçu image dans les signalements ──────────────────────────
+function AdminReportImage({ url, type }: { url: string; type: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mb-3">
+      <div className="text-[9px] font-semibold uppercase tracking-wider mb-1.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
+        {type === 'gif' ? 'GIF signalé' : 'Image signalée'}
+      </div>
+      {/* Miniature cliquable */}
+      <button
+        onClick={() => setOpen(true)}
+        className="block rounded-xl overflow-hidden hover:opacity-80 transition-opacity focus:outline-none"
+        style={{ border: '1px solid rgba(255,255,255,0.08)' }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt="Contenu signalé" className="max-h-32 max-w-xs w-auto rounded-xl object-cover" loading="lazy" />
+      </button>
+      <p className="mt-1 text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>Cliquer pour agrandir</p>
+
+      {/* Lightbox */}
+      {open && (
+        <div className="fixed inset-0 z-[200] bg-black/90 backdrop-blur-sm flex items-center justify-center p-6"
+             onClick={() => setOpen(false)}>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src={url} alt="Contenu signalé" className="max-w-full max-h-full rounded-2xl object-contain shadow-2xl"
+               onClick={e => e.stopPropagation()} />
+          <button onClick={() => setOpen(false)}
+            className="absolute top-5 right-5 w-10 h-10 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20 text-lg">✕</button>
+          <a href={url} target="_blank" rel="noopener noreferrer" download onClick={e => e.stopPropagation()}
+             className="absolute bottom-5 right-5 px-3 py-1.5 rounded-lg bg-white/10 text-white text-[12px] hover:bg-white/20">⬇ Télécharger</a>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ══════════════════════════════════════════════════════════════════
 //  PAGE PRINCIPALE
@@ -57,7 +93,7 @@ export default function AdminPanelPage() {
   const [screen, setScreen] = useState<Screen>(() => (getStoredToken() ? 'dashboard' : 'loading'));
 
   // Token admin en ref (rapide, pas de re-render)
-  const adminTokenRef = useRef<string | null>(getStoredToken());
+  const adminTokenRef = useRef(getStoredToken() as string | null);
   const tokenExpiresRef = useRef<number>(
     Number(typeof window !== 'undefined' ? sessionStorage.getItem(ADMIN_EXPIRES_KEY) || '0' : '0')
   );
@@ -82,28 +118,45 @@ export default function AdminPanelPage() {
   const [reports, setReports] = useState<any[]>([]);
   const [reportFilter, setReportFilter] = useState('pending');
   const [users, setUsers] = useState<any[]>([]);
+  // ⭐ Phase 4.1d — Recherche, tri, changement tier dans le tableau utilisateurs
+  const [userSearch,      setUserSearch]      = useState('');
+  const [userSortKey,     setUserSortKey]     = useState<string>('created_at');
+  const [userSortDir,     setUserSortDir]     = useState('desc' as 'asc' | 'desc');
+  const [tierUpdating,    setTierUpdating]    = useState(null as string | null);
+  const [userTypeFilter,  setUserTypeFilter]  = useState('all' as 'all' | 'registered' | 'guest');
   const [groups, setGroups] = useState<any[]>([]);
   const [dashLoading, setDashLoading] = useState(false);
   const [timeLeft, setTimeLeft] = useState(0);
   const [toast, setToast] = useState('');
+  // ⭐ Phase 4.1c — Paramètres globaux
+  const [appSettings, setAppSettings]       = useState<Record<string,string>>({});
+  const [settingsDirty, setSettingsDirty]   = useState<Record<string,string>>({});
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  // ⭐ Phase 4.1f — Sécurité invités
+  const [secStats,      setSecStats]        = useState<any>(null);
+  const [secFps,        setSecFps]          = useState<any[]>([]);
+  const [secIps,        setSecIps]          = useState<any[]>([]);
+  const [secTab,        setSecTab]          = useState('fps' as 'fps' | 'ips');
+  const [secIpDetail,   setSecIpDetail]     = useState(null as ({ip:string; rows:any[]} | null));
+  const [manualIpBan,   setManualIpBan]     = useState('');
 
   // ⭐ État modal mute (onglet utilisateurs)
-  const [muteTarget, setMuteTarget] = useState<{ id: string; name: string } | null>(null);
+  const [muteTarget, setMuteTarget] = useState(null as ({ id: string; name: string } | null));
   const [muteDuration, setMuteDuration] = useState('30m');
   const [muteReason, setMuteReason] = useState('');
   const [muteCustomReason, setMuteCustomReason] = useState('');
   const [muteMessage, setMuteMessage] = useState('');
 
   // ⭐ État modal ban (onglet utilisateurs)
-  const [banTarget, setBanTarget] = useState<{ id: string; name: string } | null>(null);
+  const [banTarget, setBanTarget] = useState(null as ({ id: string; name: string } | null));
   const [banDuration, setBanDuration] = useState('permanent');
   const [banReason, setBanReason] = useState('');
   const [banCustomReason, setBanCustomReason] = useState('');
   const [banMessage, setBanMessage] = useState('');
 
   // ⭐ État modal action sur signalement (masquer / muter / bannir)
-  const [actionTarget, setActionTarget] = useState<{ report: any } | null>(null);
-  const [actionType, setActionType] = useState<'hide' | 'hide_mute' | 'hide_ban'>('hide');
+  const [actionTarget, setActionTarget] = useState(null as ({ report: any } | null));
+  const [actionType, setActionType] = useState('hide' as 'hide' | 'hide_mute' | 'hide_ban');
   const [actionDuration, setActionDuration] = useState('1h');
   const [actionReason, setActionReason] = useState('');
   const [actionCustomReason, setActionCustomReason] = useState('');
@@ -114,7 +167,7 @@ export default function AdminPanelPage() {
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDesc, setNewGroupDesc] = useState('');
-  const [newGroupType, setNewGroupType] = useState<'public' | 'private'>('public');
+  const [newGroupType, setNewGroupType] = useState('public' as 'public' | 'private');
   const [newGroupRules, setNewGroupRules] = useState('');
   const [createGroupLoading, setCreateGroupLoading] = useState(false);
 
@@ -243,12 +296,99 @@ export default function AdminPanelPage() {
     setDashLoading(false);
   }, [adminApi]);
 
+  // ⭐ Phase 4.1c — Paramètres globaux
+  const loadSettings = useCallback(async () => {
+    setDashLoading(true);
+    try {
+      const d = await adminApi('get', '/settings');
+      const map: Record<string, string> = {};
+      for (const s of (d?.settings || [])) map[s.key] = s.value;
+      setAppSettings(map);
+      setSettingsDirty({});
+    } catch (err: any) {
+      showToast('Erreur chargement paramètres');
+    }
+    setDashLoading(false);
+  }, [adminApi]);
+
+  const saveSettings = async () => {
+    if (Object.keys(settingsDirty).length === 0) return;
+    setSettingsSaving(true);
+    try {
+      await adminApi('patch', '/settings', { settings: settingsDirty });
+      setAppSettings(prev => ({ ...prev, ...settingsDirty }));
+      setSettingsDirty({});
+      showToast('✅ Paramètres sauvegardés');
+    } catch {
+      showToast('❌ Erreur lors de la sauvegarde');
+    }
+    setSettingsSaving(false);
+  };
+
+  const updateSetting = (key: string, value: string) => {
+    setSettingsDirty(prev => ({ ...prev, [key]: value }));
+  };
+
+  const getSetting = (key: string): string =>
+    settingsDirty[key] ?? appSettings[key] ?? '';
+
+  // ⭐ Phase 4.1f — Chargement données sécurité
+  const loadSecurity = useCallback(async () => {
+    setDashLoading(true);
+    try {
+      const [stats, fps, ips] = await Promise.all([
+        adminApi('get', '/security/stats'),
+        adminApi('get', '/security/fingerprints'),
+        adminApi('get', '/security/ips'),
+      ]);
+      setSecStats(stats);
+      setSecFps(fps?.rows || []);
+      setSecIps(ips?.rows || []);
+    } catch { showToast('Erreur chargement sécurité'); }
+    setDashLoading(false);
+  }, [adminApi]);
+
+  const unbanFp = async (fp: string) => {
+    try {
+      await adminApi('delete', `/security/fingerprints/${encodeURIComponent(fp)}`);
+      setSecFps(prev => prev.filter(r => r.fingerprint !== fp));
+      showToast('✅ Fingerprint débanni');
+    } catch { showToast('❌ Erreur'); }
+  };
+
+  const unbanIp = async (ip: string) => {
+    try {
+      await adminApi('delete', `/security/ips/${encodeURIComponent(ip)}`);
+      setSecIps(prev => prev.filter(r => r.ip_address !== ip));
+      showToast('✅ IP débannie');
+    } catch { showToast('❌ Erreur'); }
+  };
+
+  const banIpManual = async () => {
+    if (!manualIpBan.trim()) return;
+    try {
+      await adminApi('post', '/security/ips', { ip: manualIpBan.trim(), reason: 'Ban manuel admin' });
+      setManualIpBan('');
+      await loadSecurity();
+      showToast('✅ IP bannie');
+    } catch { showToast('❌ Erreur'); }
+  };
+
+  const loadIpDetail = async (ip: string) => {
+    try {
+      const d = await adminApi('get', `/security/ip-history/${encodeURIComponent(ip)}`);
+      setSecIpDetail({ ip, rows: d?.rows || [] });
+    } catch { showToast('Erreur chargement historique IP'); }
+  };
+
   useEffect(() => {
     if (screen !== 'dashboard') return;
     if (tab === 'stats') loadStats();
     else if (tab === 'moderation') loadReports();
     else if (tab === 'users') loadUsers();
     else if (tab === 'groups') loadGroups();
+    else if (tab === 'settings') loadSettings();
+    else if (tab === 'security') loadSecurity();
   }, [screen, tab, loadStats, loadReports, loadUsers, loadGroups]);
 
   // ⭐ Fix 1 — Auto-refresh signalements toutes les 15s quand l'onglet est actif (silencieux)
@@ -673,10 +813,12 @@ export default function AdminPanelPage() {
   //  DASHBOARD
   // ══════════════════════════════════════════════════════════════
   const TABS: { id: Tab; icon: string; label: string }[] = [
-    { id: 'stats', icon: '📊', label: 'Statistiques' },
+    { id: 'stats',    icon: '📊', label: 'Statistiques' },
     { id: 'moderation', icon: '🚩', label: 'Modération' },
-    { id: 'users', icon: '👥', label: 'Utilisateurs' },
-    { id: 'groups', icon: '💬', label: 'Salons' },
+    { id: 'users',    icon: '👥', label: 'Utilisateurs' },
+    { id: 'groups',   icon: '💬', label: 'Salons' },
+    { id: 'settings', icon: '⚙️', label: 'Paramètres' },
+    { id: 'security', icon: '🔐', label: 'Sécurité' },
   ];
 
   return (
@@ -837,6 +979,13 @@ export default function AdminPanelPage() {
                             {r.message_content}
                           </div>
                         )}
+                        {/* ⭐ Phase 4.1 — Aperçu image/gif dans le signalement */}
+                        {(r.message_type === 'image' || r.message_type === 'gif') && (r.message_file_url || r.message_gif_url) && (
+                          <AdminReportImage
+                            url={(r.message_file_url || r.message_gif_url) as string}
+                            type={r.message_type}
+                          />
+                        )}
 
                         {/* Liste des reporters + raisons */}
                         <div className="space-y-1.5 mb-3">
@@ -880,58 +1029,198 @@ export default function AdminPanelPage() {
           )}
 
           {/* ════ UTILISATEURS ════ */}
-          {tab === 'users' && (
-            <div>
-              <h2 className="text-xl font-bold text-white mb-5">👥 Utilisateurs ({users.length})</h2>
-              <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                <table className="w-full">
-                  <thead>
-                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-                      {['Utilisateur', 'Email', 'Tier', 'Rôle', 'Statut', 'Inscrit', 'Actions'].map(h => (
-                        <th key={h} className="text-left px-4 py-3 text-[10px] font-semibold uppercase" style={{ color: 'rgba(255,255,255,0.3)' }}>{h}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {users.map(u => (
-                      <tr key={u.id} className="transition-colors hover:bg-white/[0.02]" style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
-                        <td className="px-4 py-3 text-sm font-medium text-white">{u.username}</td>
-                        <td className="px-4 py-3 text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{u.email || '—'}</td>
-                        <td className="px-4 py-3">
-                          <span className="text-[9px] font-bold px-1.5 py-0.5 rounded"
-                            style={{ background: u.tier === 'premium' ? 'rgba(251,191,36,0.15)' : u.tier === 'registered' ? 'rgba(34,197,94,0.15)' : 'rgba(255,255,255,0.05)',
-                              color: u.tier === 'premium' ? '#fbbf24' : u.tier === 'registered' ? '#4ade80' : 'rgba(255,255,255,0.4)' }}>
-                            {u.tier?.toUpperCase()}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-sm">{u.app_role === 'superadmin' ? '🛡️' : '—'}</td>
-                        <td className="px-4 py-3">
-                          {u.is_banned ? <span className="text-[9px] font-bold text-red-400">BANNI</span>
-                            : u.is_muted ? <span className="text-[9px] font-bold text-orange-400">MUTÉ</span>
-                            : <span className="text-[9px] text-green-400">OK</span>}
-                        </td>
-                        <td className="px-4 py-3 text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>{new Date(u.created_at).toLocaleDateString('fr-FR')}</td>
-                        <td className="px-4 py-3 text-right space-x-2">
-                          {u.app_role !== 'superadmin' && (
-                            <>
-                              {u.is_muted
-                                ? <button onClick={() => unmuteUser(u.id)} className="text-[10px] text-blue-400 hover:underline">Démuter</button>
-                                : <button onClick={() => muteUser(u.id, u.username)} className="text-[10px] text-orange-400 hover:underline">Muter</button>
-                              }
-                              {u.is_banned
-                                ? <button onClick={() => unbanUser(u.id)} className="text-[10px] text-green-400 hover:underline">Débannir</button>
-                                : <button onClick={() => banUser(u.id, u.username)} className="text-[10px] text-red-400 hover:underline">Bannir</button>
-                              }
-                            </>
-                          )}
-                        </td>
+          {tab === 'users' && (() => {
+            // ─── Tri et filtre client-side ────────────────────────────────
+            const sortedFiltered = [...users]
+              .filter(u => {
+                // Filtre par type
+                if (userTypeFilter === 'registered' && u.tier === 'guest') return false;
+                if (userTypeFilter === 'guest' && u.tier !== 'guest') return false;
+                // Filtre par recherche
+                if (!userSearch.trim()) return true;
+                const q = userSearch.toLowerCase();
+                return (u.username || '').toLowerCase().includes(q)
+                    || (u.email || '').toLowerCase().includes(q)
+                    || (u.tier || '').toLowerCase().includes(q);
+              })
+              .sort((a, b) => {
+                let va = a[userSortKey] ?? '';
+                let vb = b[userSortKey] ?? '';
+                if (typeof va === 'string') va = va.toLowerCase();
+                if (typeof vb === 'string') vb = vb.toLowerCase();
+                if (va < vb) return userSortDir === 'asc' ? -1 : 1;
+                if (va > vb) return userSortDir === 'asc' ? 1 : -1;
+                return 0;
+              });
+
+            const toggleSort = (key: string) => {
+              if (userSortKey === key) setUserSortDir(d => d === 'asc' ? 'desc' : 'asc');
+              else { setUserSortKey(key); setUserSortDir('asc'); }
+            };
+            const sortIcon = (key: string) =>
+              userSortKey !== key ? ' ⇅' : userSortDir === 'asc' ? ' ↑' : ' ↓';
+
+            const changeTier = async (userId: string, newTier: string) => {
+              setTierUpdating(userId);
+              try {
+                await adminApi('patch', `/users/${userId}/tier`, { tier: newTier });
+                setUsers(prev => prev.map(u => u.id === userId ? { ...u, tier: newTier } : u));
+                showToast(`✅ Tier mis à jour → ${newTier}`);
+              } catch { showToast('❌ Erreur changement de tier'); }
+              setTierUpdating(null);
+            };
+
+            return (
+              <div>
+                {/* En-tête + barre recherche */}
+                {/* Sous-onglets : Tous / Inscrits / Invités */}
+                <div className="flex gap-1.5 mb-4">
+                  {([
+                    { id: 'all',        label: `Tous (${users.length})` },
+                    { id: 'registered', label: `Inscrits (${users.filter(u => u.tier !== 'guest').length})` },
+                    { id: 'guest',      label: `Invités (${users.filter(u => u.tier === 'guest').length})` },
+                  ] as { id: 'all'|'registered'|'guest'; label: string }[]).map(opt => (
+                    <button key={opt.id} onClick={() => setUserTypeFilter(opt.id)}
+                      className="px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all"
+                      style={{
+                        background: userTypeFilter === opt.id ? 'rgba(139,92,246,0.15)' : 'rgba(255,255,255,0.03)',
+                        border: userTypeFilter === opt.id ? '1px solid rgba(139,92,246,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                        color: userTypeFilter === opt.id ? '#c4b5fd' : 'rgba(255,255,255,0.5)',
+                      }}>
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex items-center gap-3 mb-5 flex-wrap">
+                  <h2 className="text-xl font-bold text-white">👥 Utilisateurs ({users.length})</h2>
+                  <div className="flex-1 min-w-[220px] max-w-xs">
+                    <input
+                      type="text"
+                      value={userSearch}
+                      onChange={e => setUserSearch(e.target.value)}
+                      placeholder="Rechercher pseudo, email, tier…"
+                      className="w-full px-3 py-1.5 rounded-lg text-[12px] outline-none"
+                      style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'white' }}
+                    />
+                  </div>
+                  {userSearch && (
+                    <span className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                      {sortedFiltered.length} résultat{sortedFiltered.length !== 1 ? 's' : ''}
+                    </span>
+                  )}
+                  <button onClick={() => { setUserSearch(''); setUserSortKey('created_at'); setUserSortDir('desc'); }}
+                    className="text-[10px] px-2 py-1 rounded-lg transition-colors hover:text-white"
+                    style={{ color: 'rgba(255,255,255,0.3)', border: '1px solid rgba(255,255,255,0.08)' }}>
+                    Réinitialiser
+                  </button>
+                </div>
+
+                <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  <table className="w-full">
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                        {[
+                          { key: 'username',   label: 'Utilisateur' },
+                          { key: 'email',      label: 'Email' },
+                          { key: 'tier',       label: 'Tier' },
+                          { key: 'app_role',   label: 'Rôle' },
+                          { key: 'is_banned',  label: 'Statut' },
+                          { key: 'created_at', label: 'Inscrit' },
+                        ].map(col => (
+                          <th key={col.key}
+                            onClick={() => toggleSort(col.key)}
+                            className="text-left px-4 py-3 text-[10px] font-semibold uppercase cursor-pointer select-none transition-colors hover:text-white/60"
+                            style={{ color: userSortKey === col.key ? '#a78bfa' : 'rgba(255,255,255,0.3)' }}>
+                            {col.label}{sortIcon(col.key)}
+                          </th>
+                        ))}
+                        <th className="text-left px-4 py-3 text-[10px] font-semibold uppercase" style={{ color: 'rgba(255,255,255,0.3)' }}>Actions</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {sortedFiltered.length === 0 ? (
+                        <tr><td colSpan={7} className="px-4 py-8 text-center text-[12px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                          Aucun utilisateur trouvé
+                        </td></tr>
+                      ) : sortedFiltered.map(u => (
+                        <tr key={u.id} className="transition-colors hover:bg-white/[0.02]"
+                          style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+
+                          {/* Pseudo */}
+                          <td className="px-4 py-3 text-sm font-medium text-white">{u.username}</td>
+
+                          {/* Email */}
+                          <td className="px-4 py-3 text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>{u.email || '—'}</td>
+
+                          {/* Tier — sélecteur inline */}
+                          <td className="px-4 py-3">
+                            {u.app_role === 'superadmin' ? (
+                              <span className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+                                style={{ background: 'rgba(139,92,246,0.2)', color: '#a78bfa' }}>SUPERADMIN</span>
+                            ) : (
+                              <select
+                                value={u.tier}
+                                disabled={tierUpdating === u.id}
+                                onChange={e => changeTier(u.id, e.target.value)}
+                                className="text-[10px] font-bold px-2 py-0.5 rounded cursor-pointer outline-none transition-all"
+                                style={{
+                                  background: u.tier === 'premium' ? 'rgba(251,191,36,0.15)'
+                                            : u.tier === 'registered' ? 'rgba(34,197,94,0.15)'
+                                            : 'rgba(255,255,255,0.05)',
+                                  color: u.tier === 'premium' ? '#fbbf24'
+                                       : u.tier === 'registered' ? '#4ade80'
+                                       : 'rgba(255,255,255,0.4)',
+                                  border: '1px solid rgba(255,255,255,0.08)',
+                                }}>
+                                <option value="guest">GUEST</option>
+                                <option value="registered">REGISTERED</option>
+                                <option value="premium">PREMIUM</option>
+                              </select>
+                            )}
+                            {tierUpdating === u.id && <span className="ml-1 text-[10px] text-purple-400 animate-pulse">…</span>}
+                          </td>
+
+                          {/* Rôle */}
+                          <td className="px-4 py-3 text-sm">{u.app_role === 'superadmin' ? '🛡️' : '—'}</td>
+
+                          {/* Statut */}
+                          <td className="px-4 py-3">
+                            {u.is_banned
+                              ? <span className="text-[9px] font-bold text-red-400">BANNI</span>
+                              : u.is_muted
+                              ? <span className="text-[9px] font-bold text-orange-400">MUTÉ</span>
+                              : <span className="text-[9px] text-green-400">OK</span>}
+                          </td>
+
+                          {/* Inscrit */}
+                          <td className="px-4 py-3 text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                            {new Date(u.created_at).toLocaleDateString('fr-FR')}
+                          </td>
+
+                          {/* Actions */}
+                          <td className="px-4 py-3 text-right space-x-2">
+                            {u.app_role !== 'superadmin' && (
+                              <>
+                                {u.is_muted
+                                  ? <button onClick={() => unmuteUser(u.id)} className="text-[10px] text-blue-400 hover:underline">Démuter</button>
+                                  : <button onClick={() => muteUser(u.id, u.username)} className="text-[10px] text-orange-400 hover:underline">Muter</button>
+                                }
+                                {u.is_banned
+                                  ? <button onClick={() => unbanUser(u.id)} className="text-[10px] text-green-400 hover:underline">Débannir</button>
+                                  : <button onClick={() => banUser(u.id, u.username)} className="text-[10px] text-red-400 hover:underline">Bannir</button>
+                                }
+                              </>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* ════ SALONS ════ */}
           {tab === 'groups' && (
@@ -1014,6 +1303,654 @@ export default function AdminPanelPage() {
                   </tbody>
                 </table>
               </div>
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════
+              ONGLET PARAMÈTRES — Phase 4.1c
+          ══════════════════════════════════════════════════════ */}
+          {tab === 'settings' && (
+            <div className="p-6 space-y-6 max-w-2xl">
+
+              {/* En-tête */}
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-white">⚙️ Paramètres globaux</h2>
+                  <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                    Modifications appliquées sans redémarrage du serveur
+                  </p>
+                </div>
+                {Object.keys(settingsDirty).length > 0 && (
+                  <button onClick={saveSettings} disabled={settingsSaving}
+                    className="px-4 py-2 rounded-xl text-sm font-semibold text-white transition-all disabled:opacity-50"
+                    style={{ background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)' }}>
+                    {settingsSaving ? '⏳ Sauvegarde…' : '💾 Sauvegarder'}
+                  </button>
+                )}
+              </div>
+
+              {dashLoading ? (
+                <div className="text-center py-12" style={{ color: 'rgba(255,255,255,0.3)' }}>⏳ Chargement…</div>
+              ) : (
+                <>
+                {/* ── Bloc : Compression des images ─────────────────── */}
+                <div className="rounded-2xl p-5 space-y-5"
+                  style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+
+                  {/* Titre bloc */}
+                  <div className="flex items-center gap-3">
+                    <span className="text-xl">🖼️</span>
+                    <div>
+                      <h3 className="text-sm font-bold text-white">Compression des images</h3>
+                      <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                        Conversion automatique en WebP via Sharp — gain ~40-60% d'espace
+                      </p>
+                    </div>
+                    {/* Statut Sharp */}
+                    <span className="ml-auto text-[9px] font-bold px-2 py-0.5 rounded-full"
+                      style={{ background: 'rgba(34,197,94,0.12)', color: '#4ade80', border: '1px solid rgba(34,197,94,0.2)' }}>
+                      Sharp installé
+                    </span>
+                  </div>
+
+                  {/* Toggle activation */}
+                  <div className="flex items-center justify-between py-3 border-b"
+                    style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                    <div>
+                      <p className="text-[13px] font-medium text-white">Activer la compression</p>
+                      <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                        Si désactivée, les images sont stockées en format original
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => updateSetting('compression_enabled', getSetting('compression_enabled') === 'false' ? 'true' : 'false')}
+                      className={`relative w-12 h-6 rounded-full transition-all flex-shrink-0 ${
+                        getSetting('compression_enabled') !== 'false' ? 'bg-purple-600' : 'bg-white/10'
+                      }`}>
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
+                        getSetting('compression_enabled') !== 'false' ? 'left-6' : 'left-0.5'
+                      }`} />
+                    </button>
+                  </div>
+
+                  {/* Qualité WebP */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[13px] font-medium text-white">Qualité WebP</p>
+                        <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                          1 = plus petite taille · 100 = meilleure qualité
+                        </p>
+                      </div>
+                      <span className="text-sm font-bold text-purple-400 w-10 text-right">
+                        {getSetting('compression_quality') || '82'}
+                      </span>
+                    </div>
+                    <input type="range" min="40" max="100" step="1"
+                      value={getSetting('compression_quality') || '82'}
+                      onChange={e => updateSetting('compression_quality', e.target.value)}
+                      disabled={getSetting('compression_enabled') === 'false'}
+                      className="w-full h-1.5 rounded-full appearance-none cursor-pointer disabled:opacity-30"
+                      style={{ accentColor: '#8b5cf6' }} />
+                    <div className="flex justify-between text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                      <span>Légère (40)</span>
+                      <span>Équilibrée (82)</span>
+                      <span>Maximale (100)</span>
+                    </div>
+                  </div>
+
+                  {/* Résolution max — Utilisateurs standard */}
+                  <div className="space-y-2 pt-1 border-t" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[13px] font-medium text-white">Résolution max — Standard</p>
+                        <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                          Largeur/hauteur max en pixels pour les utilisateurs non-premium
+                        </p>
+                      </div>
+                      <span className="text-sm font-bold text-purple-400">
+                        {getSetting('compression_max_px') || '1920'} px
+                      </span>
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      {['800','1280','1920','2560','0'].map(v => (
+                        <button key={v}
+                          onClick={() => updateSetting('compression_max_px', v)}
+                          disabled={getSetting('compression_enabled') === 'false'}
+                          className={`px-3 py-1 rounded-lg text-[11px] font-medium transition-all disabled:opacity-30 ${
+                            (getSetting('compression_max_px') || '1920') === v
+                              ? 'text-white'
+                              : 'text-white/40 hover:text-white/70'
+                          }`}
+                          style={{
+                            background: (getSetting('compression_max_px') || '1920') === v
+                              ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.04)',
+                            border: (getSetting('compression_max_px') || '1920') === v
+                              ? '1px solid rgba(139,92,246,0.4)' : '1px solid rgba(255,255,255,0.06)',
+                          }}>
+                          {v === '0' ? 'Native' : `${v} px`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Résolution max — Premium */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[13px] font-medium text-white flex items-center gap-2">
+                          Résolution max — Premium
+                          <span className="text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.5 rounded-full">⭐ PREMIUM</span>
+                        </p>
+                        <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                          Membres premium bénéficient d'une résolution plus élevée
+                        </p>
+                      </div>
+                      <span className="text-sm font-bold text-amber-400">
+                        {getSetting('compression_max_px_premium') || '2560'} px
+                      </span>
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      {['1280','1920','2560','3840','0'].map(v => (
+                        <button key={v}
+                          onClick={() => updateSetting('compression_max_px_premium', v)}
+                          disabled={getSetting('compression_enabled') === 'false'}
+                          className={`px-3 py-1 rounded-lg text-[11px] font-medium transition-all disabled:opacity-30 ${
+                            (getSetting('compression_max_px_premium') || '2560') === v
+                              ? 'text-white' : 'text-white/40 hover:text-white/70'
+                          }`}
+                          style={{
+                            background: (getSetting('compression_max_px_premium') || '2560') === v
+                              ? 'rgba(245,158,11,0.15)' : 'rgba(255,255,255,0.04)',
+                            border: (getSetting('compression_max_px_premium') || '2560') === v
+                              ? '1px solid rgba(245,158,11,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                          }}>
+                          {v === '0' ? 'Native' : `${v} px`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Info résolution 0 = native */}
+                  {(getSetting('compression_max_px') === '0' || getSetting('compression_max_px_premium') === '0') && (
+                    <p className="text-[11px] px-3 py-2 rounded-lg"
+                      style={{ background: 'rgba(251,191,36,0.07)', color: 'rgba(251,191,36,0.7)', border: '1px solid rgba(251,191,36,0.12)' }}>
+                      ⚠️ «Native» conserve la résolution originale — les grandes images ne sont pas redimensionnées mais restent converties en WebP.
+                    </p>
+                  )}
+
+                  {/* Bouton sauvegarder bas de page */}
+                  {Object.keys(settingsDirty).length > 0 && (
+                    <div className="flex items-center justify-between pt-4 border-t"
+                      style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                      <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                        {Object.keys(settingsDirty).length} modification{Object.keys(settingsDirty).length > 1 ? 's' : ''} non sauvegardée{Object.keys(settingsDirty).length > 1 ? 's' : ''}
+                      </p>
+                      <div className="flex gap-2">
+                        <button onClick={() => setSettingsDirty({})}
+                          className="px-3 py-1.5 rounded-lg text-[12px] text-white/40 hover:text-white/70 transition-colors"
+                          style={{ border: '1px solid rgba(255,255,255,0.08)' }}>
+                          Annuler
+                        </button>
+                        <button onClick={saveSettings} disabled={settingsSaving}
+                          className="px-4 py-1.5 rounded-lg text-[12px] font-semibold text-white transition-all disabled:opacity-50"
+                          style={{ background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)' }}>
+                          {settingsSaving ? '⏳ Sauvegarde…' : '💾 Sauvegarder'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Bloc : Liste des membres ──────────────────────── */}
+                <div className="rounded-2xl p-5 space-y-5 mt-4"
+                  style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+
+                  <div className="flex items-center gap-3">
+                    <span className="text-xl">👥</span>
+                    <div>
+                      <h3 className="text-sm font-bold text-white">Liste des membres</h3>
+                      <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                        Paramètres d'affichage du panneau de membres (droite du chat)
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Masquer invités déco */}
+                  <div className="flex items-center justify-between py-3 border-b"
+                    style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                    <div>
+                      <p className="text-[13px] font-medium text-white">Masquer les invités déconnectés</p>
+                      <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                        Appliqué globalement à toutes les listes, pour tous les tiers
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => updateSetting('members_hide_offline_guests',
+                        getSetting('members_hide_offline_guests') === 'true' ? 'false' : 'true')}
+                      className={`relative w-12 h-6 rounded-full transition-all flex-shrink-0 ${
+                        getSetting('members_hide_offline_guests') === 'true' ? 'bg-purple-600' : 'bg-white/10'
+                      }`}>
+                      <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
+                        getSetting('members_hide_offline_guests') === 'true' ? 'left-6' : 'left-0.5'
+                      }`} />
+                    </button>
+                  </div>
+
+                  {/* TTL hors-ligne */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <p className="text-[13px] font-medium text-white">Durée d'affichage hors-ligne</p>
+                        <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                          Membres déconnectés depuis plus longtemps sont masqués (inscrits et premium en mode allégé)
+                        </p>
+                      </div>
+                      <span className="text-sm font-bold text-purple-400 w-16 text-right">
+                        {getSetting('members_offline_ttl_minutes') || '10'} min
+                      </span>
+                    </div>
+                    <div className="flex gap-2 flex-wrap">
+                      {['5','10','15','30','60'].map(v => (
+                        <button key={v}
+                          onClick={() => updateSetting('members_offline_ttl_minutes', v)}
+                          className={`px-3 py-1 rounded-lg text-[11px] font-medium transition-all ${
+                            (getSetting('members_offline_ttl_minutes') || '10') === v
+                              ? 'text-white' : 'text-white/40 hover:text-white/70'
+                          }`}
+                          style={{
+                            background: (getSetting('members_offline_ttl_minutes') || '10') === v
+                              ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.04)',
+                            border: (getSetting('members_offline_ttl_minutes') || '10') === v
+                              ? '1px solid rgba(139,92,246,0.4)' : '1px solid rgba(255,255,255,0.06)',
+                          }}>
+                          {v} min
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {Object.keys(settingsDirty).some(k => k.startsWith('members_')) && (
+                    <div className="flex justify-end pt-2">
+                      <button onClick={saveSettings} disabled={settingsSaving}
+                        className="px-4 py-1.5 rounded-lg text-[12px] font-semibold text-white transition-all disabled:opacity-50"
+                        style={{ background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)' }}>
+                        {settingsSaving ? '⏳…' : '💾 Sauvegarder'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════
+              ONGLET PARAMÈTRES — Bloc GIF (Phase 4)
+          ══════════════════════════════════════════════════════ */}
+          {tab === 'settings' && !dashLoading && (
+            <div className="rounded-2xl p-5 space-y-5 mt-4 max-w-2xl ml-6"
+              style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+
+              <div className="flex items-center gap-3">
+                <span className="text-xl">🎞️</span>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Affichage des GIFs</h3>
+                  <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                    Contrôle comment les GIFs animés s'affichent selon le tier
+                  </p>
+                </div>
+              </div>
+
+              {/* Règle par tier */}
+              {([
+                { tier: 'guest',      label: '👤 Invités',  key: 'gif_display_guest' },
+                { tier: 'registered', label: '✅ Inscrits', key: 'gif_display_registered' },
+                { tier: 'premium',    label: '⭐ Premium',  key: 'gif_display_premium' },
+              ] as { tier: string; label: string; key: string }[]).map(({ label, key }) => (
+                <div key={key} className="space-y-1.5">
+                  <p className="text-[12px] font-medium text-white">{label}</p>
+                  <div className="flex gap-2">
+                    {([
+                      { v: 'visible', desc: '👁 Visible', hint: 'Affichage direct dans le chat' },
+                      { v: 'masked',  desc: '🙈 Masqué',  hint: 'Cliquer pour voir le GIF' },
+                      { v: 'option',  desc: '⚙️ Option',  hint: "L'utilisateur choisit" },
+                    ]).map(({ v, desc, hint }) => (
+                      <button key={v}
+                        onClick={() => updateSetting(key, v)}
+                        title={hint}
+                        className="flex-1 py-2 rounded-lg text-[11px] font-medium transition-all"
+                        style={{
+                          background: (getSetting(key) || (key === 'gif_display_guest' ? 'masked' : key === 'gif_display_premium' ? 'visible' : 'option')) === v
+                            ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.03)',
+                          border: (getSetting(key) || (key === 'gif_display_guest' ? 'masked' : key === 'gif_display_premium' ? 'visible' : 'option')) === v
+                            ? '1px solid rgba(139,92,246,0.4)' : '1px solid rgba(255,255,255,0.06)',
+                          color: (getSetting(key) || (key === 'gif_display_guest' ? 'masked' : key === 'gif_display_premium' ? 'visible' : 'option')) === v
+                            ? '#c4b5fd' : 'rgba(255,255,255,0.4)',
+                        }}>
+                        {desc}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                    {(() => {
+                      const val = getSetting(key) || (key === 'gif_display_guest' ? 'masked' : key === 'gif_display_premium' ? 'visible' : 'option');
+                      if (val === 'visible') return '→ Les GIFs s\'affichent directement';
+                      if (val === 'masked')  return '→ L\'utilisateur clique pour voir (économie bande passante)';
+                      return '→ Chaque utilisateur règle sa préférence dans son profil';
+                    })()}
+                  </p>
+                </div>
+              ))}
+
+              {/* Limite du picker */}
+              <div className="pt-2 border-t" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <p className="text-[12px] font-medium text-white">GIFs par requête (picker)</p>
+                    <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                      Nombre de GIFs chargés à chaque recherche ou tendance
+                    </p>
+                  </div>
+                  <span className="text-sm font-bold text-purple-400">
+                    {getSetting('gif_picker_limit') || '20'}
+                  </span>
+                </div>
+                <div className="flex gap-2 flex-wrap">
+                  {['8','12','16','20','24','32','48'].map(v => (
+                    <button key={v}
+                      onClick={() => updateSetting('gif_picker_limit', v)}
+                      className="px-3 py-1 rounded-lg text-[11px] font-medium transition-all"
+                      style={{
+                        background: (getSetting('gif_picker_limit') || '20') === v
+                          ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.04)',
+                        border: (getSetting('gif_picker_limit') || '20') === v
+                          ? '1px solid rgba(139,92,246,0.4)' : '1px solid rgba(255,255,255,0.06)',
+                        color: (getSetting('gif_picker_limit') || '20') === v
+                          ? '#c4b5fd' : 'rgba(255,255,255,0.4)',
+                      }}>
+                      {v}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Sauvegarder */}
+              {Object.keys(settingsDirty).some(k => k.startsWith('gif_')) && (
+                <div className="flex justify-end pt-2">
+                  <button onClick={saveSettings} disabled={settingsSaving}
+                    className="px-4 py-1.5 rounded-lg text-[12px] font-semibold text-white transition-all disabled:opacity-50"
+                    style={{ background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)' }}>
+                    {settingsSaving ? '⏳…' : '💾 Sauvegarder'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════
+              ONGLET SÉCURITÉ — Phase 4.1f
+          ══════════════════════════════════════════════════════ */}
+          {tab === 'security' && (
+            <div className="p-6 space-y-5">
+
+              {/* En-tête + stats */}
+              <div className="flex items-center justify-between flex-wrap gap-3">
+                <div>
+                  <h2 className="text-lg font-bold text-white">🔐 Sécurité invités</h2>
+                  <p className="text-[11px] mt-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                    Fingerprints bannis, historique IP et permabans automatiques
+                  </p>
+                </div>
+                <button onClick={loadSecurity}
+                  className="px-3 py-1.5 rounded-lg text-[11px] font-medium transition-colors"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(255,255,255,0.6)' }}>
+                  🔄 Rafraîchir
+                </button>
+              </div>
+
+              {/* Statistiques rapides */}
+              {secStats && (
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { label: 'Fingerprints bannis', value: secStats.banned_fingerprints, color: '#f87171' },
+                    { label: 'IPs permabannies',    value: secStats.banned_ips,          color: '#fb923c' },
+                    { label: 'Connexions loguées',  value: secStats.total_ip_logs,       color: '#a78bfa' },
+                  ].map(s => (
+                    <div key={s.label} className="rounded-xl p-4 text-center"
+                      style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                      <div className="text-2xl font-bold" style={{ color: s.color }}>{s.value}</div>
+                      <div className="text-[10px] mt-1" style={{ color: 'rgba(255,255,255,0.4)' }}>{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Sous-onglets Fingerprints / IPs */}
+              <div className="flex gap-2">
+                {[{ id: 'fps', label: '🪪 Fingerprints bannis' }, { id: 'ips', label: '🌐 IPs permabannies' }].map(st => (
+                  <button key={st.id} onClick={() => setSecTab(st.id as 'fps'|'ips')}
+                    className="px-3 py-1.5 rounded-lg text-[12px] font-medium transition-all"
+                    style={{
+                      background: secTab === st.id ? 'rgba(139,92,246,0.15)' : 'rgba(255,255,255,0.03)',
+                      border: secTab === st.id ? '1px solid rgba(139,92,246,0.3)' : '1px solid rgba(255,255,255,0.06)',
+                      color: secTab === st.id ? '#c4b5fd' : 'rgba(255,255,255,0.5)',
+                    }}>
+                    {st.label}
+                  </button>
+                ))}
+              </div>
+
+              {/* ── Fingerprints bannis ─────────────────────────────── */}
+              {secTab === 'fps' && (
+                <div className="rounded-xl overflow-hidden"
+                  style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                  {secFps.length === 0 ? (
+                    <div className="py-8 text-center text-[12px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                      Aucun fingerprint banni
+                    </div>
+                  ) : (
+                    <table className="w-full">
+                      <thead>
+                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                          {['Pseudo (snapshot)', 'Fingerprint', 'Dernière IP', 'Raison', 'Type', 'Date', ''].map(h => (
+                            <th key={h} className="text-left px-3 py-2.5 text-[9px] font-semibold uppercase tracking-wider"
+                              style={{ color: 'rgba(255,255,255,0.3)' }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {secFps.map((row: any) => (
+                          <tr key={row.id} className="hover:bg-white/[0.02] transition-colors"
+                            style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                            <td className="px-3 py-2.5 text-[12px] font-medium text-white">
+                              {row.username_snapshot || '—'}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <span className="font-mono text-[10px]"
+                                style={{ color: 'rgba(255,255,255,0.35)' }} title={row.fingerprint}>
+                                {row.fingerprint.substring(0, 16)}…
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 text-[11px]" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                              {row.last_known_ip || '—'}
+                            </td>
+                            <td className="px-3 py-2.5 text-[11px] max-w-[180px] truncate"
+                              style={{ color: 'rgba(255,255,255,0.5)' }}>
+                              {row.reason || '—'}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                row.is_permanent
+                                  ? 'text-red-400 bg-red-500/10'
+                                  : 'text-orange-400 bg-orange-500/10'
+                              }`}>
+                                {row.is_permanent ? 'PERMANENT' : 'TEMPORAIRE'}
+                              </span>
+                            </td>
+                            <td className="px-3 py-2.5 text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                              {new Date(row.created_at).toLocaleDateString('fr-FR')}
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              <button onClick={() => unbanFp(row.fingerprint)}
+                                className="text-[10px] text-green-400 hover:underline">
+                                Débannir
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              )}
+
+              {/* ── IPs permabannies ────────────────────────────────── */}
+              {secTab === 'ips' && (
+                <div className="space-y-4">
+                  {/* Ban manuel */}
+                  <div className="flex gap-2">
+                    <input type="text" value={manualIpBan}
+                      onChange={e => setManualIpBan(e.target.value)}
+                      placeholder="Saisir une IP à bannir manuellement (ex: 1.2.3.4)"
+                      className="flex-1 px-3 py-2 rounded-lg text-[12px] outline-none"
+                      style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'white' }}
+                      onKeyDown={e => e.key === 'Enter' && banIpManual()}
+                    />
+                    <button onClick={banIpManual}
+                      className="px-4 py-2 rounded-lg text-[12px] font-semibold text-white transition-all"
+                      style={{ background: 'linear-gradient(135deg, #ef4444, #dc2626)' }}>
+                      🚫 Bannir
+                    </button>
+                  </div>
+
+                  <div className="rounded-xl overflow-hidden"
+                    style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+                    {secIps.length === 0 ? (
+                      <div className="py-8 text-center text-[12px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                        Aucune IP permabannit
+                      </div>
+                    ) : (
+                      <table className="w-full">
+                        <thead>
+                          <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                            {['IP', 'Bans', 'Raison', 'Type', 'Date', ''].map(h => (
+                              <th key={h} className="text-left px-3 py-2.5 text-[9px] font-semibold uppercase tracking-wider"
+                                style={{ color: 'rgba(255,255,255,0.3)' }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {secIps.map((row: any) => (
+                            <tr key={row.id} className="hover:bg-white/[0.02] transition-colors"
+                              style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                              <td className="px-3 py-2.5">
+                                <button onClick={() => loadIpDetail(row.ip_address)}
+                                  className="font-mono text-[12px] font-semibold text-purple-400 hover:underline">
+                                  {row.ip_address}
+                                </button>
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <span className="text-[11px] font-bold text-red-400">
+                                  {row.ban_count} ban{row.ban_count > 1 ? 's' : ''}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-[11px] max-w-[200px] truncate"
+                                style={{ color: 'rgba(255,255,255,0.5)' }}>
+                                {row.reason || '—'}
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded ${
+                                  row.is_auto ? 'text-orange-400 bg-orange-500/10' : 'text-red-400 bg-red-500/10'
+                                }`}>
+                                  {row.is_auto ? 'AUTO' : 'MANUEL'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                                {new Date(row.created_at).toLocaleDateString('fr-FR')}
+                              </td>
+                              <td className="px-3 py-2.5 text-right">
+                                <button onClick={() => unbanIp(row.ip_address)}
+                                  className="text-[10px] text-green-400 hover:underline">
+                                  Débannir
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── Modal historique IP ─────────────────────────────── */}
+              {secIpDetail && (
+                <div className="fixed inset-0 z-[150] flex items-center justify-center bg-black/60 backdrop-blur-sm"
+                  onClick={() => setSecIpDetail(null)}>
+                  <div className="w-[600px] max-h-[70vh] flex flex-col rounded-2xl shadow-2xl overflow-hidden"
+                    style={{ background: 'rgba(15,15,35,0.98)', border: '1px solid rgba(139,92,246,0.2)' }}
+                    onClick={e => e.stopPropagation()}>
+                    <div className="h-1" style={{ background: 'linear-gradient(90deg,#8b5cf6,#6d28d9)' }} />
+                    <div className="px-5 py-4 border-b flex items-center justify-between"
+                      style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+                      <div>
+                        <h3 className="font-bold text-white">🌐 Historique IP</h3>
+                        <p className="text-[11px] font-mono" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                          {secIpDetail.ip}
+                        </p>
+                      </div>
+                      <button onClick={() => setSecIpDetail(null)}
+                        className="w-7 h-7 rounded-lg flex items-center justify-center text-white/40 hover:text-white hover:bg-white/5 text-sm">✕</button>
+                    </div>
+                    <div className="flex-1 overflow-y-auto p-4">
+                      {secIpDetail.rows.length === 0 ? (
+                        <p className="text-center text-[12px] py-8" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                          Aucune connexion enregistrée
+                        </p>
+                      ) : (
+                        <table className="w-full">
+                          <thead>
+                            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
+                              {['Pseudo', 'Tier', 'Statut', 'Vu le'].map(h => (
+                                <th key={h} className="text-left px-3 py-2 text-[9px] font-semibold uppercase"
+                                  style={{ color: 'rgba(255,255,255,0.3)' }}>{h}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {secIpDetail.rows.map((r: any, i: number) => (
+                              <tr key={i} className="hover:bg-white/[0.02]"
+                                style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                                <td className="px-3 py-2 text-[12px] font-medium text-white">
+                                  {r.username || <span style={{ color: 'rgba(255,255,255,0.3)' }}>Compte supprimé</span>}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <span className="text-[9px] font-bold px-1.5 py-0.5 rounded"
+                                    style={{
+                                      background: r.tier === 'premium' ? 'rgba(251,191,36,0.15)' : 'rgba(255,255,255,0.05)',
+                                      color: r.tier === 'premium' ? '#fbbf24' : 'rgba(255,255,255,0.4)',
+                                    }}>
+                                    {(r.tier || 'guest').toUpperCase()}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2">
+                                  {r.is_banned
+                                    ? <span className="text-[9px] font-bold text-red-400">BANNI</span>
+                                    : <span className="text-[9px] text-green-400">OK</span>}
+                                </td>
+                                <td className="px-3 py-2 text-[10px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                                  {new Date(r.seen_at).toLocaleString('fr-FR')}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -1130,6 +2067,13 @@ export default function AdminPanelPage() {
                     <div className="text-[9px] font-semibold uppercase tracking-wider mb-1" style={{ color: 'rgba(255,255,255,0.3)' }}>Message signalé</div>
                     <div className="line-clamp-2 italic">{r.message_content}</div>
                   </div>
+                )}
+                {/* ⭐ Phase 4.1 — Aperçu image dans la modale d'action */}
+                {(r.message_type === 'image' || r.message_type === 'gif') && (r.message_file_url || r.message_gif_url) && (
+                  <AdminReportImage
+                    url={(r.message_file_url || r.message_gif_url) as string}
+                    type={r.message_type}
+                  />
                 )}
 
                 {/* Choix de l'action */}

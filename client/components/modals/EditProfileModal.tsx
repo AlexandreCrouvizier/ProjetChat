@@ -6,6 +6,7 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '@/lib/api';
 import { useAuthStore } from '@/stores/authStore';
+import { useGifConfig, invalidateGifConfigCache } from '@/hooks/useGifConfig';
 
 interface EditProfileModalProps { isOpen: boolean; onClose: () => void; }
 
@@ -29,10 +30,12 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
   const [bio, setBio] = useState('');
   const [statusText, setStatusText] = useState('');
   const [statusEmoji, setStatusEmoji] = useState('');
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarPreview, setAvatarPreview] = useState(null as string | null);
   const [avatarChanged, setAvatarChanged] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [gifDisplay, setGifDisplay] = useState(null as 'auto' | 'click' | null);
+  const gifConfig = useGifConfig();
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -48,6 +51,7 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
       setAvatarPreview(user.avatar_url || null);
       setAvatarChanged(false);
       setShowEmojiPicker(false);
+      setGifDisplay((user.gif_display as 'auto' | 'click' | null) ?? null);
       setError(''); setSuccess('');
     }
   }, [isOpen, user]);
@@ -80,8 +84,12 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
   const handleSave = async () => {
     setSaving(true); setError(''); setSuccess('');
     try {
-      // 1. Profil
-      const { data: profileData } = await api.patch('/users/me', { username: username.trim(), bio: bio.trim() });
+      // 1. Profil (inclut gif_display)
+      const { data: profileData } = await api.patch('/users/me', {
+        username: username.trim(),
+        bio: bio.trim(),
+        gif_display: gifDisplay,
+      });
 
       // 2. Avatar si modifié
       if (avatarChanged) {
@@ -95,7 +103,7 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
       // 3. Statut
       await api.patch('/users/me/status', { status_text: statusText.trim(), status_emoji: statusEmoji.trim() });
 
-      setUser({ ...profileData.user, avatar_url: avatarChanged ? avatarPreview : profileData.user.avatar_url, status_text: statusText.trim(), status_emoji: statusEmoji.trim() });
+      setUser({ ...profileData.user, avatar_url: avatarChanged ? avatarPreview : profileData.user.avatar_url, status_text: statusText.trim(), status_emoji: statusEmoji.trim(), gif_display: gifDisplay });
       setSuccess('Profil mis à jour !');
       setTimeout(() => onClose(), 800);
     } catch (err: any) {
@@ -212,6 +220,42 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
               <button onClick={() => { setStatusText(''); setStatusEmoji(''); }} className="text-[10px] text-red-400 hover:underline mt-1.5">Effacer le statut</button>
             )}
           </div>
+
+          {/* ⭐ Affichage des GIFs — visible seulement si le tier permet 'option' */}
+          {(() => {
+            const tier = user?.tier as 'guest' | 'registered' | 'premium' | undefined;
+            const rule = tier ? (gifConfig?.display?.[tier] ?? 'option') : 'option';
+            if (rule !== 'option') return null;
+            return (
+              <div className="mb-5 pt-4 border-t border-[var(--border)]">
+                <label className="block text-[9px] font-semibold text-[var(--t3)] uppercase tracking-wider mb-2">
+                  🎞️ Affichage des GIFs animés
+                </label>
+                <div className="flex items-center justify-between p-3 rounded-xl"
+                  style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                  <div>
+                    <p className="text-[13px] font-medium text-[var(--t1)]">
+                      {gifDisplay === 'auto' ? 'Affichage automatique' : 'Afficher au clic'}
+                    </p>
+                    <p className="text-[11px] text-[var(--t3)] mt-0.5">
+                      {gifDisplay === 'auto'
+                        ? "Les GIFs s'affichent directement dans le chat"
+                        : 'Cliquer sur le placeholder pour voir le GIF'}
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setGifDisplay(d => d === 'auto' ? 'click' : 'auto')}
+                    className={`relative w-12 h-6 rounded-full transition-all flex-shrink-0 ml-3 ${
+                      gifDisplay === 'auto' ? 'bg-purple-600' : 'bg-white/10'
+                    }`}>
+                    <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
+                      gifDisplay === 'auto' ? 'left-6' : 'left-0.5'
+                    }`} />
+                  </button>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Boutons */}
           <div className="flex gap-2">

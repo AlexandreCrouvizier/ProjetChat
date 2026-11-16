@@ -6,6 +6,7 @@
  * Solution : suppressHydrationWarning sur <html> et <body>.
  */
 
+import { AppModalProvider } from '@/components/ui/AppModal';
 import type { Metadata } from 'next';
 import '../styles/globals.css';
 import { AuthProvider } from '@/components/ui/AuthProvider';
@@ -34,7 +35,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <div className="orb-4" />
         </div>
         <AuthProvider>
-          <main className="relative z-10">{children}</main>
+          <main className="relative z-10"><AppModalProvider>{children}</AppModalProvider></main>
           <CookieBanner />
         </AuthProvider>
       </body>

@@ -13,6 +13,9 @@
 
 import bcrypt from 'bcrypt';
 import crypto from 'crypto';
+import { redis } from '../config/redis';
+import { guestSecurityService } from './guestSecurity.service';
+import { db } from '../config/database';
 import { userRepository } from '../repositories/user.repository';
 import { sessionRepository } from '../repositories/session.repository';
 import { generateAccessToken, generateRefreshToken, verifyRefreshToken } from '../utils/jwt';
@@ -138,43 +141,115 @@ export const authService = {
    */
   async loginAsGuest(data: {
     username?: string;
+    fingerprint?: string;
     ip: string;
     userAgent?: string;
   }) {
-    let username = data.username;
+    // ── 0. Vérifications sécurité fingerprint + IP ─────────────────────────
 
-    // 1. Si pas de pseudo fourni, en générer un aléatoire
-    if (!username) {
-      const randomNum = Math.floor(Math.random() * 9000) + 1000;
-      username = `Invité_${randomNum}`;
+    if (data.fingerprint) {
+      // Fingerprint banni ?
+      const fpCheck = await guestSecurityService.isFingerprintBanned(data.fingerprint);
+      if (fpCheck.banned) {
+        throw new ValidationError(
+          fpCheck.permanent ? 'Accès définitivement refusé.' : 'Accès temporairement refusé.',
+          'fingerprint'
+        );
+      }
     }
 
-    // 2. Vérifier que le pseudo n'est pas pris par un inscrit
+    // IP permabannit ?
+    const ipCheck = await guestSecurityService.isIpPermabanned(data.ip);
+    if (ipCheck.banned) {
+      throw new ValidationError('Accès refusé depuis cette adresse réseau.', 'ip');
+    }
+
+    // Nouveau fingerprint depuis une IP à risque élevé ?
+    if (data.fingerprint) {
+      const dangerous = await guestSecurityService.isNewFingerprintFromDangerousIp(data.fingerprint, data.ip);
+      if (dangerous) {
+        throw new ValidationError('Accès refusé depuis cette adresse réseau.', 'ip');
+      }
+    }
+
+    // ── 1. Reconnexion d'un invité existant via son fingerprint ──────────────
+    // Si le fingerprint existe déjà en BDD → reconnexion (même invité qui revient)
+    if (data.fingerprint) {
+      const existingByFp = await db('users')
+        .where({ guest_fingerprint: data.fingerprint, tier: 'guest' })
+        .whereNull('ban_expires_at')
+        .where(q => q.where('is_banned', false).orWhereNull('is_banned'))
+        .select('*')
+        .first();
+
+      if (existingByFp) {
+        // Mettre à jour la dernière IP
+        await db('users').where({ id: existingByFp.id }).update({
+          last_ip: data.ip,
+          last_seen_at: db.fn.now(),
+        });
+
+        // Log sécurité
+        await guestSecurityService.logConnection({
+          fingerprint: data.fingerprint,
+          userId:      existingByFp.id,
+          ip:          data.ip,
+          userAgent:   data.userAgent,
+        });
+
+        await logAudit('login', data.ip, existingByFp.id, { method: 'guest_reconnect', fingerprint: data.fingerprint }, data.userAgent);
+
+        const payload = { userId: existingByFp.id, username: existingByFp.username, tier: 'guest' };
+        return {
+          user: this.sanitizeUser(existingByFp),
+          access_token: generateAccessToken(payload),
+        };
+      }
+    }
+
+    // ── 2. Nouvel invité — générer un username unique ──────────────────────
+    let username = data.username;
+
+    if (!username) {
+      const counter = await redis.incr('guest:username_counter');
+      username = `Invité_${String(counter).padStart(5, '0')}`;
+    }
+
+    // Vérifier que le pseudo n'est pas pris par un inscrit
     if (await userRepository.isUsernameTaken(username)) {
       throw new ValidationError('Ce pseudo est réservé par un utilisateur inscrit', 'username');
     }
 
-    // 3. Vérifier si un invité avec ce pseudo existe déjà
-    const existing = await userRepository.findByUsername(username);
-    if (existing && existing.tier === 'guest') {
-      // Un invité avec ce pseudo existe → en générer un nouveau
-      const randomNum = Math.floor(Math.random() * 9000) + 1000;
-      username = `Invité_${randomNum}`;
+    // Pseudo invité déjà pris → en générer un nouveau
+    const existingByUsername = await userRepository.findByUsername(username);
+    if (existingByUsername && existingByUsername.tier === 'guest') {
+      const counter = await redis.incr('guest:username_counter');
+      username = `Invité_${String(counter).padStart(5, '0')}`;
     }
 
-    // 4. Créer le compte invité
+    // ── 3. Créer le nouveau compte invité ─────────────────────────────────
     const user = await userRepository.create({
       username,
       tier: 'guest',
       last_ip: data.ip,
-    });
+      guest_fingerprint: data.fingerprint || null,
+    } as any);
 
-    // 5. Générer uniquement un access token (pas de refresh pour les invités)
+    // Log sécurité
+    if (data.fingerprint) {
+      await guestSecurityService.logConnection({
+        fingerprint: data.fingerprint,
+        userId:      user.id,
+        ip:          data.ip,
+        userAgent:   data.userAgent,
+      });
+    }
+
+    // Log LCEN
+    await logAudit('login', data.ip, user.id, { method: 'guest', fingerprint: data.fingerprint }, data.userAgent);
+
     const payload = { userId: user.id, username: user.username, tier: user.tier };
     const accessToken = generateAccessToken(payload);
-
-    // 6. Log LCEN
-    await logAudit('login', data.ip, user.id, { method: 'guest' }, data.userAgent);
 
     return {
       user: this.sanitizeUser(user),

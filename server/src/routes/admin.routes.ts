@@ -25,6 +25,7 @@ import { cleanupService } from '../services/cleanup.service';
 import { moderationActionRepository } from '../repositories/moderation-action.repository';
 import { reportRepository } from '../repositories/report.repository';
 import { messageRepository } from '../repositories/message.repository';
+import { guestSecurityService } from '../services/guestSecurity.service';
 import { db } from '../config/database';
 
 // ══════════════════════════════════
@@ -187,6 +188,29 @@ adminRouter.post('/users/:id/ban', async (req, res) => {
       ban_reason: finalReason,
       ban_expires_at: banAction.expires_at || null,
     });
+
+    // ⭐ Phase 4.1f — Si c'est un invité, bannir aussi son fingerprint + IP logic
+    const targetUser = await db('users')
+      .where({ id: targetId })
+      .select('tier', 'guest_fingerprint', 'last_ip', 'username')
+      .first();
+
+    if (targetUser?.tier === 'guest' && targetUser.guest_fingerprint) {
+      const adminUsername = req.user!.username || 'admin';
+      const result = await guestSecurityService.banFingerprint({
+        fingerprint:      targetUser.guest_fingerprint,
+        usernameSnapshot: targetUser.username,
+        lastKnownIp:      targetUser.last_ip || null,
+        reason:           finalReason,
+        permanent:        !banAction.expires_at,
+        expiresAt:        banAction.expires_at ? new Date(banAction.expires_at) : null,
+        bannedBy:         adminUsername,
+      });
+
+      if (result.permaban_triggered) {
+        console.log(`🚫 Permaban IP automatique déclenché (${result.ip_ban_count} fingerprints bannis)`);
+      }
+    }
 
     // ⭐ Notification WebSocket
     const io = req.app.get('io');
@@ -431,6 +455,138 @@ adminRouter.post('/reports/action', async (req, res) => {
     console.error('❌ admin reports/action:', error);
     res.status(500).json({ error: 'INTERNAL_ERROR' });
   }
+});
+
+// ══════════════════════════════════════════════════════════════════
+//  PARAMÈTRES GLOBAUX — Phase 4.1c
+// ══════════════════════════════════════════════════════════════════
+
+/** PATCH /api/admin/users/:id/tier — Changer le tier d'un utilisateur */
+adminRouter.patch('/users/:id/tier', async (req, res) => {
+  try {
+    const { tier } = req.body;
+    if (!['guest', 'registered', 'premium'].includes(tier)) {
+      return res.status(400).json({ error: 'Tier invalide. Valeurs : guest, registered, premium' });
+    }
+    await db('users').where({ id: req.params.id }).update({ tier });
+
+    // ⭐ Notifier le client en temps réel → il rafraîchit son JWT sans se déconnecter
+    const io = req.app.get('io');
+    if (io) io.to(`user:${req.params.id}`).emit('user:tier_updated', { tier });
+
+    res.json({ success: true, id: req.params.id, tier });
+  } catch (error: any) {
+    console.error('❌ admin users tier:', error);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+
+adminRouter.get('/settings', async (_req, res) => {
+  try {
+    const rows = await db('app_settings').select('*').orderBy('key');
+    res.json({ settings: rows });
+  } catch (error: any) {
+    console.error('❌ admin settings GET:', error);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/** PATCH /api/admin/settings — Mettre à jour un ou plusieurs paramètres */
+adminRouter.patch('/settings', async (req, res) => {
+  try {
+    const updates: Record<string, string> = req.body.settings || {};
+    if (!updates || Object.keys(updates).length === 0) {
+      return res.status(400).json({ error: 'Aucune valeur fournie' });
+    }
+
+    for (const [key, value] of Object.entries(updates)) {
+      await db('app_settings')
+        .where({ key })
+        .update({ value: String(value), updated_at: db.fn.now() });
+    }
+
+    // Invalider le cache de upload.routes
+    try {
+      const { invalidateSettingsCache } = await import('./upload.routes');
+      invalidateSettingsCache();
+    } catch { /* import dynamique optionnel */ }
+
+    res.json({ success: true, updated: Object.keys(updates) });
+  } catch (error: any) {
+    console.error('❌ admin settings PATCH:', error);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════
+//  SÉCURITÉ INVITÉS — Phase 4.1f
+// ══════════════════════════════════════════════════════════════════
+
+/** GET /api/admin/security/stats */
+adminRouter.get('/security/stats', async (_req, res) => {
+  try {
+    const stats = await guestSecurityService.getSecurityStats();
+    res.json(stats);
+  } catch { res.status(500).json({ error: 'INTERNAL_ERROR' }); }
+});
+
+/** GET /api/admin/security/fingerprints?page=1 */
+adminRouter.get('/security/fingerprints', async (req, res) => {
+  try {
+    const page  = parseInt(req.query.page as string || '1', 10);
+    const limit = parseInt(req.query.limit as string || '50', 10);
+    const data  = await guestSecurityService.getBannedFingerprints(page, limit);
+    res.json(data);
+  } catch { res.status(500).json({ error: 'INTERNAL_ERROR' }); }
+});
+
+/** DELETE /api/admin/security/fingerprints/:fp — Débannir un fingerprint */
+adminRouter.delete('/security/fingerprints/:fp', async (req, res) => {
+  try {
+    await guestSecurityService.unbanFingerprint(req.params.fp);
+    res.json({ success: true });
+  } catch { res.status(500).json({ error: 'INTERNAL_ERROR' }); }
+});
+
+/** GET /api/admin/security/ips?page=1 */
+adminRouter.get('/security/ips', async (req, res) => {
+  try {
+    const page  = parseInt(req.query.page as string || '1', 10);
+    const limit = parseInt(req.query.limit as string || '50', 10);
+    const data  = await guestSecurityService.getBannedIps(page, limit);
+    res.json(data);
+  } catch { res.status(500).json({ error: 'INTERNAL_ERROR' }); }
+});
+
+/** POST /api/admin/security/ips — Permaban manuel d'une IP */
+adminRouter.post('/security/ips', async (req, res) => {
+  try {
+    const { ip, reason } = req.body;
+    if (!ip) return res.status(400).json({ error: 'ip requis' });
+    await guestSecurityService.manualPermbanIp({
+      ip,
+      reason: reason || 'Banni manuellement',
+      bannedBy: req.user!.username || 'admin',
+    });
+    res.json({ success: true });
+  } catch { res.status(500).json({ error: 'INTERNAL_ERROR' }); }
+});
+
+/** DELETE /api/admin/security/ips/:ip — Débannir une IP */
+adminRouter.delete('/security/ips/:ip', async (req, res) => {
+  try {
+    await guestSecurityService.unbanIp(req.params.ip);
+    res.json({ success: true });
+  } catch { res.status(500).json({ error: 'INTERNAL_ERROR' }); }
+});
+
+/** GET /api/admin/security/ip-history/:ip */
+adminRouter.get('/security/ip-history/:ip', async (req, res) => {
+  try {
+    const rows = await guestSecurityService.getIpHistory(req.params.ip);
+    res.json({ rows });
+  } catch { res.status(500).json({ error: 'INTERNAL_ERROR' }); }
 });
 
 export default adminRouter;

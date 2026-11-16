@@ -1,5 +1,5 @@
 /**
- * stores/authStore.ts — Phase 2 : ajout avatar_url, bio, status
+ * stores/authStore.ts — ajout gif_display
  */
 import { create } from 'zustand';
 
@@ -14,6 +14,7 @@ export interface AuthUser {
   theme: string;
   status_text?: string | null;
   status_emoji?: string | null;
+  gif_display?: 'auto' | 'click' | null;  // ⭐ préférence personnelle (null = règle admin)
 }
 
 interface AuthState {

@@ -35,6 +35,9 @@ npm-debug.log*
 # Uploads
 uploads/*
 !uploads/.gitkeep
+server/uploads/*
+!server/uploads/.gitkeep
+*.pdf
 
 # Docker volumes (local)
 pgdata/

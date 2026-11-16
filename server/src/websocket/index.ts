@@ -53,10 +53,36 @@ export function setupWebSocket(io: SocketIOServer): void {
       for (const cid of convIds) socket.join(`conv:${cid}`);
     } catch (err) { console.error('⚠️ rooms conversations:', err); }
 
-    // ⭐ Présence : stocker avec le socketId pour gérer les multi-onglets
+    // ⭐ Présence : stocker dans Redis
     await redis.hset('presence', userId, JSON.stringify({ socketId: socket.id, username, tier, connectedAt: Date.now() }));
     await userRepository.update(userId, { last_seen_at: new Date().toISOString(), last_ip: socket.userIp } as any);
     socket.broadcast.emit('presence:update', { user_id: userId, status: 'online' });
+
+    // ⭐ Heartbeat 60s : maintient last_seen_at à jour pour les utilisateurs actifs
+    // Sans ça, après 5min, last_seen_at devient vieux → MembersPanel les affiche offline
+    const heartbeatInterval = setInterval(async () => {
+      if (!socket.connected) { clearInterval(heartbeatInterval); return; }
+      try {
+        await userRepository.update(userId, { last_seen_at: new Date().toISOString() } as any);
+      } catch { clearInterval(heartbeatInterval); }
+    }, 60_000);
+
+    // ⭐ Logout explicite : le client émet 'user:logout' AVANT de fermer la connexion
+    // IMPORTANT : on met last_seen_at = il y a 10min (PAS NOW)
+    // Si on met NOW, le MembersPanel voit un timestamp récent → croit que l'user est online
+    socket.on('user:logout', async () => {
+      clearInterval(heartbeatInterval);
+      await redis.hdel('presence', userId);
+      // last_seen_at = 10min dans le passé → MembersPanel voit timestamp > 5min → offline ✅
+      const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+      await userRepository.update(userId, { last_seen_at: tenMinAgo } as any);
+      socket.broadcast.emit('presence:update', {
+        user_id: userId,
+        status: 'offline',
+        last_seen_at: tenMinAgo,
+      });
+      console.log(`🚪 [WS] ${username} déconnexion volontaire`);
+    });
 
     // Handlers
     registerMessageHandlers(io, socket);
@@ -64,19 +90,24 @@ export function setupWebSocket(io: SocketIOServer): void {
     registerReactionHandlers(io, socket);
     registerConversationHandlers(io, socket);
 
-    // ⭐ Déconnexion — vérifier qu'il n'y a pas d'autre socket du même user
+    // ⭐ Déconnexion réseau (fermeture onglet, perte connexion, etc.)
     socket.on('disconnect', async (reason) => {
       console.log(`👋 [WS] ${username} déconnecté (${reason})`);
+      clearInterval(heartbeatInterval);
 
-      // Vérifier si l'utilisateur a encore d'autres sockets connectés
       const otherSockets = await io.in(`user:${userId}`).fetchSockets();
       const hasOtherConnections = otherSockets.length > 0;
 
       if (!hasOtherConnections) {
-        // Plus aucune connexion → marquer offline
         await redis.hdel('presence', userId);
-        await userRepository.update(userId, { last_seen_at: new Date().toISOString() } as any);
-        socket.broadcast.emit('presence:update', { user_id: userId, status: 'offline', last_seen_at: new Date().toISOString() });
+        // Même principe : timestamp dans le passé pour éviter les faux positifs
+        const tenMinAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+        await userRepository.update(userId, { last_seen_at: tenMinAgo } as any);
+        socket.broadcast.emit('presence:update', {
+          user_id: userId,
+          status: 'offline',
+          last_seen_at: tenMinAgo,
+        });
         console.log(`   → ${username} est maintenant hors ligne`);
       } else {
         console.log(`   → ${username} a encore ${otherSockets.length} connexion(s) active(s)`);
