@@ -30,15 +30,17 @@
 
 ---
 
-## Lot 2 — Dépendances serveur (🔜)
+## Lot 2 — Dépendances serveur (✅ fait le 16/11/2026)
 
-`npm audit` : **19 vulnérabilités côté serveur (2 critiques)**. Côté client : **0** depuis le lot 3.
+`npm audit` serveur : **19 vulnérabilités (2 critiques) → 0**. Côté client : **0** depuis le lot 3.
 
-- [ ] `npm audit fix` (correctifs sans rupture : Express, Socket.io, ws, lodash, qs, morgan, axios…)
-- [ ] `bcrypt` 5 → 6 (supprime `tar` vulnérable, critique)
-- [ ] `sharp` 0.34 → 0.35 (failles libvips / libheif / librsvg)
-- [ ] `multer` 1.x → 2.x (failles connues, version 1 abandonnée)
-- [ ] Supprimer les dépendances inutilisées : `uuid` (remplacé par `crypto.randomUUID`), `zod`, `node-cron`
+- [x] `npm audit fix` (correctifs sans rupture : Express, Socket.io, engine.io, ws, lodash, qs, morgan, proxy-addr, body-parser…)
+- [x] `bcrypt` 5 → 6 (supprime `tar` vulnérable, critique) — les mots de passe existants (`$2b$`) restent valides
+- [x] `sharp` 0.34 → 0.35.5 (failles libvips / libheif / librsvg) — compression WebP et détection des faux fichiers vérifiées
+- [x] `multer` 1.x → 2.5 (failles connues, version 1 abandonnée)
+- [x] Dépendances inutilisées supprimées : `uuid`, `zod`, `node-cron`, `passport-github2` (+ leurs types)
+- [x] `engines.node >= 20.9` (requis par sharp 0.35) et script `npm run typecheck`
+- [x] Affichage des adresses réseau : cartes virtuelles (WSL/Docker/Hyper-V) masquées
 
 ## Lot 3 — Next.js 14 → 16 (✅ fait le 16/11/2026)
 

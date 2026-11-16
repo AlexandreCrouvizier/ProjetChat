@@ -7,9 +7,12 @@ const os = require('os');
 // pour que le téléphone / la tablette du réseau local fonctionnent avec `npm run dev:lan`.
 function getLanAddresses() {
   const privateRe = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/;
-  return Object.values(os.networkInterfaces())
-    .flat()
-    .filter((i) => i && i.family === 'IPv4' && !i.internal && privateRe.test(i.address))
+  // Cartes virtuelles (WSL, Docker, Hyper-V…) ignorées : seul le vrai réseau local compte
+  const virtualAdapter = /vEthernet|WSL|Hyper-V|Docker|VirtualBox|VMware|vboxnet|^br-|^veth|^docker/i;
+  return Object.entries(os.networkInterfaces())
+    .filter(([name]) => !virtualAdapter.test(name))
+    .flatMap(([, list]) => list || [])
+    .filter((i) => i.family === 'IPv4' && !i.internal && privateRe.test(i.address))
     .map((i) => i.address);
 }
 

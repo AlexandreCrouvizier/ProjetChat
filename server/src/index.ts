@@ -18,10 +18,15 @@ import { setupWebSocket } from './websocket/index';
 import { corsOrigin } from './utils/cors';
 
 /** Adresses IPv4 de ce PC sur le réseau local (pour tester depuis un téléphone, etc.) */
+// Cartes réseau virtuelles (WSL, Docker, Hyper-V, VirtualBox, VMware) : joignables uniquement
+// depuis ce PC, inutiles pour le téléphone → on ne les affiche pas.
+const VIRTUAL_ADAPTER = /vEthernet|WSL|Hyper-V|Docker|VirtualBox|VMware|vboxnet|^br-|^veth|^docker/i;
+
 function getLanAddresses(): string[] {
-  return Object.values(os.networkInterfaces())
-    .flat()
-    .filter((i): i is os.NetworkInterfaceInfo => !!i && i.family === 'IPv4' && !i.internal)
+  return Object.entries(os.networkInterfaces())
+    .filter(([name]) => !VIRTUAL_ADAPTER.test(name))
+    .flatMap(([, list]) => list ?? [])
+    .filter((i) => i.family === 'IPv4' && !i.internal)
     .map((i) => i.address);
 }
 
