@@ -12,7 +12,7 @@ import { safeMediaUrl, safeHttpsUrl } from '@/lib/safeUrl';
 
 interface LinkPreviewData {
   title:       string;
-  description: string;
+  description: string | null;
   image:       string | null;
   url:         string;
   site_name:   string | null;

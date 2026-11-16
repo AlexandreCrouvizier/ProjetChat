@@ -17,6 +17,7 @@ import uploadRoutes from './routes/upload.routes';
 import path from 'path';
 import { db } from './config/database';
 import { corsOrigin } from './utils/cors';
+import { requireAdminGateway } from './middleware/adminGateway.middleware';
 
 const app = express();
 app.use(helmet());
@@ -92,8 +93,9 @@ app.use('/uploads', express.static(path.join(process.cwd(), 'uploads'), {
 // ⭐ Phase 4.1 : Routes upload image/fichier
 app.use('/api/upload', uploadRoutes);
 
-app.use('/api/admin-auth', adminAuthRouter);  // ⭐ TOTP setup/verify
-app.use('/api/admin', adminRouter);            // ⭐ Dashboard admin (post-TOTP)
+// 🔐 Routes admin : uniquement via la passerelle admin (PC seul, port ADMIN_PORT)
+app.use('/api/admin-auth', requireAdminGateway, adminAuthRouter);  // ⭐ TOTP setup/verify
+app.use('/api/admin', requireAdminGateway, adminRouter);            // ⭐ Dashboard admin (post-TOTP)
 
 app.use((_req, res) => { res.status(404).json({ error: 'NOT_FOUND', message: 'Route introuvable' }); });
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {

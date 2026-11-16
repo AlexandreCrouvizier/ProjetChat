@@ -16,6 +16,7 @@ export interface Message {
   conversation_id: string | null;
   parent_message_id: string | null;  // Thread
   reply_to_id: string | null;        // Quote
+  reply_to: { id: string; author_username: string; content: string } | null;
   type: MessageType;
   file_url: string | null;
   gif_url: string | null;
@@ -25,6 +26,7 @@ export interface Message {
   is_hidden: boolean;
   reactions: ReactionSummary[];
   thread_count: number;
+  thread_last_reply_at: string | null;
   edited_at: string | null;
   created_at: string;
 }
@@ -34,6 +36,7 @@ export interface LinkPreview {
   description: string | null;
   image: string | null;
   url: string;
+  site_name: string | null;
 }
 
 export interface Reaction {

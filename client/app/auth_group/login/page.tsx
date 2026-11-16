@@ -7,7 +7,7 @@
 
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
@@ -15,7 +15,7 @@ import { useAuthStore } from '@/stores/authStore';
 import { connectSocket } from '@/lib/socket';
 import api from '@/lib/api';
 
-export default function LoginPage() {
+function LoginPageContent() {
   const { login, loginAsGuest } = useAuth();
   const { setUser } = useAuthStore();
   const router = useRouter();
@@ -142,5 +142,14 @@ export default function LoginPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+// useSearchParams() lit l'adresse côté navigateur : Next.js exige une zone Suspense autour.
+export default function LoginPage() {
+  return (
+    <Suspense fallback={null}>
+      <LoginPageContent />
+    </Suspense>
   );
 }

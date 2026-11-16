@@ -12,7 +12,7 @@ import { safeMediaUrl } from '@/lib/safeUrl';
 import { useGifAutoDisplay, useGifConfig } from '@/hooks/useGifConfig';
 
 interface LinkPreviewData {
-  title: string; description: string; image: string | null; url: string; site_name: string | null;
+  title: string; description: string | null; image: string | null; url: string; site_name: string | null;
 }
 interface MessageContentProps {
   content: string;

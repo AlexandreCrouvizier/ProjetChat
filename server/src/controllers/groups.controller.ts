@@ -271,7 +271,7 @@ export const groupsController = {
       res.status(201).json({
         invitation: {
           code: invitation.code,
-          link: `${process.env.APP_URL || 'http://localhost:3000'}/invites/${invitation.code}`,
+          link: `${process.env.APP_URL || 'http://localhost:1608'}/invites/${invitation.code}`,
           max_uses: invitation.max_uses,
           expires_at: invitation.expires_at,
         },

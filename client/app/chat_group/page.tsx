@@ -8,7 +8,7 @@
  */
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useChat } from '@/hooks/useChat';
 import type { ChatMessage } from '@/hooks/useChat';
@@ -31,7 +31,7 @@ import { showModal } from '@/components/ui/AppModal';
 
 type ChatMode = 'group' | 'dm';
 
-export default function ChatPage() {
+function ChatPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, isAuthenticated, isLoading: authLoading, logout } = useAuth();
@@ -167,7 +167,9 @@ export default function ChatPage() {
 
   // ⭐ Phase 4.1 — Envoi d'un média (image, gif, fichier)
   const handleSendMedia = async (params: { type: 'image' | 'gif' | 'file'; file_url?: string; gif_url?: string; content?: string }) => {
-    try { await activeChat.sendMediaMessage(params); }
+    // Les médias ne sont pas encore pris en charge en message privé (dm:send = texte uniquement)
+    if (mode !== 'group') { showModal("L'envoi d'images, de GIF et de fichiers n'est pas encore disponible en message privé.", 'warning'); return; }
+    try { await groupChat.sendMediaMessage(params); }
     catch (err: any) {
       const msg = err.message || '';
       if (msg.includes('muté') || msg.includes('muted') || err.muted) {
@@ -407,5 +409,14 @@ export default function ChatPage() {
         </div>
       )}
     </div>
+  );
+}
+
+// useSearchParams() lit l'adresse côté navigateur : Next.js exige une zone Suspense autour.
+export default function ChatPage() {
+  return (
+    <Suspense fallback={null}>
+      <ChatPageContent />
+    </Suspense>
   );
 }

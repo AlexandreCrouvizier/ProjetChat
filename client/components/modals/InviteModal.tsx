@@ -55,7 +55,7 @@ export function InviteModal({ isOpen, groupId, groupName, onClose }: InviteModal
   const [copied, setCopied] = useState(false);
   const modalRef = useRef<HTMLDivElement>(null);
 
-  const appUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3000';
+  const appUrl = typeof window !== 'undefined' ? window.location.origin : 'http://localhost:1608';
 
   const loadInvitations = async () => {
     setLoading(true);

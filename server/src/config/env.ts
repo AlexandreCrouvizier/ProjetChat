@@ -7,7 +7,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 export const env = {
   // App
   APP_NAME: process.env.APP_NAME || 'chatapp',
-  APP_URL: process.env.APP_URL || 'http://localhost:3000',
+  APP_URL: process.env.APP_URL || 'http://localhost:1608',
   NODE_ENV: process.env.NODE_ENV || 'development',
   isDev: process.env.NODE_ENV !== 'production',
 
@@ -36,18 +36,22 @@ export const env = {
   // 🔐 Secret des tokens du panel admin (émis après TOTP).
   // Absent en dev → dérivé du secret d'accès (HMAC), jamais une valeur connue.
   ADMIN_JWT_SECRET: process.env.ADMIN_JWT_SECRET || '',
+
+  // 🔐 Secret ajouté par la passerelle admin (port ADMIN_PORT, PC uniquement).
+  // Vide → panel et API admin désactivés (fermé par défaut).
+  ADMIN_GATEWAY_SECRET: process.env.ADMIN_GATEWAY_SECRET || '',
 };
 
 // Vérifie les variables critiques en production
 if (!env.isDev) {
-  const required = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'ADMIN_JWT_SECRET', 'DATABASE_URL'];
+  const required = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'ADMIN_JWT_SECRET', 'ADMIN_GATEWAY_SECRET', 'DATABASE_URL'];
   for (const key of required) {
     if (!process.env[key]) {
       throw new Error(`Variable d'environnement manquante : ${key}`);
     }
   }
   // 🔐 Refuser de démarrer en production avec des secrets faibles ou identiques
-  const secrets = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'ADMIN_JWT_SECRET'].map((k) => process.env[k] || '');
+  const secrets = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'ADMIN_JWT_SECRET', 'ADMIN_GATEWAY_SECRET'].map((k) => process.env[k] || '');
   if (secrets.some((s) => s.length < 64 || /^(dev|CHANGE_ME)/i.test(s))) {
     throw new Error('Secrets JWT trop faibles en production (64 caractères aléatoires minimum)');
   }

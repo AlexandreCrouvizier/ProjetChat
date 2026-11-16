@@ -62,7 +62,7 @@ async function start() {
     console.log(`   ⚡ WebSocket : ws://localhost:${env.PORT}`);
     console.log(`   📡 Frontend  : ${env.APP_URL}`);
     if (env.isDev) {
-      const frontPort = new URL(env.APP_URL).port || '3000';
+      const frontPort = new URL(env.APP_URL).port || '1608';
       const lan = getLanAddresses();
       if (lan.length) {
         console.log('   📱 Depuis un autre appareil du Wi-Fi (lancer le client avec npm run dev:lan) :');

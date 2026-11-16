@@ -30,9 +30,9 @@
 
 ---
 
-## Lot 2 — Dépendances serveur et client (🔜)
+## Lot 2 — Dépendances serveur (🔜)
 
-`npm audit` : **19 vulnérabilités côté serveur (2 critiques)**, **14 côté client (1 critique)**.
+`npm audit` : **19 vulnérabilités côté serveur (2 critiques)**. Côté client : **0** depuis le lot 3.
 
 - [ ] `npm audit fix` (correctifs sans rupture : Express, Socket.io, ws, lodash, qs, morgan, axios…)
 - [ ] `bcrypt` 5 → 6 (supprime `tar` vulnérable, critique)
@@ -40,11 +40,34 @@
 - [ ] `multer` 1.x → 2.x (failles connues, version 1 abandonnée)
 - [ ] Supprimer les dépendances inutilisées : `uuid` (remplacé par `crypto.randomUUID`), `zod`, `node-cron`
 
-## Lot 3 — Next.js 14 → 16 (🔜, le plus urgent après le lot 1)
+## Lot 3 — Next.js 14 → 16 (✅ fait le 16/11/2026)
 
-Next 14.2.35 cumule des failles **critiques d'exécution de code à distance**, dont une **spécifique aux serveurs Windows**. Corrigées à partir de 15.5.28 (branche 15) / 16.x.
-- Implique React 18 → 19 et quelques adaptations de code.
-- ⚠️ En attendant : lancer le client avec `npm run dev` (PC seul) ; `npm run dev:lan` uniquement le temps des tests sur mobile.
+Next 14.2.35 cumulait des failles **critiques d'exécution de code à distance**, dont une **spécifique aux serveurs Windows**.
+
+- [x] Next.js **14.2.35 → 16.4.6** (Turbopack par défaut), React / React DOM **18 → 19.3**, types React 19
+- [x] Dépendances inutilisées supprimées : `next-themes` (bloquait React 19), `clsx`
+- [x] Script `lint` supprimé (`next lint` n'existe plus en v16) → remplacé par `npm run typecheck`
+- [x] `allowedDevOrigins` : seules les adresses réseau local du PC peuvent utiliser le rechargement à chaud (`dev:lan`)
+- [x] Les clés GIF ne sont plus recopiées dans le code du navigateur via `env` (bloc inutilisé)
+- [x] Pages `/auth_group/login` et `/chat_group` : `useSearchParams()` entouré d'un `<Suspense>` (la compilation de production échouait)
+- [x] Types Socket.io (`shared/types/websocket.types.ts`) réécrits pour correspondre aux événements réels → **erreurs TypeScript client : 50 → 0**, `npm run build` passe de nouveau
+- [x] Bugs révélés par TypeScript : `showModal` non importé dans la zone de saisie (plantage si un envoi échouait) ; envoi de média en message privé (fonction inexistante → message clair à la place)
+- Résultat : `npm audit` client = **0 vulnérabilité**
+
+## Lot 3 bis — Ports dédiés et panel admin isolé (✅ fait le 16/11/2026)
+
+| Service | Port | Accessible depuis |
+|---|---|---|
+| Chat (Next.js) | **1608** | PC + Wi-Fi (avec `npm run dev:lan`) |
+| Panel admin (passerelle) | **2025** | **Ce PC uniquement** (`127.0.0.1` / `::1`) |
+| Serveur API + temps réel | 4000 | PC + Wi-Fi |
+
+- [x] Chat déplacé de 3000 → **1608** (fin du conflit avec Open WebUI)
+- [x] Passerelle admin `client/scripts/admin-gateway.mjs` (`npm run admin`) : n'écoute que sur ce PC, ajoute l'en-tête secret `x-chatapp-admin-gateway` (`ADMIN_GATEWAY_SECRET`), refuse les noms d'hôte non locaux (anti DNS rebinding), redirige tout ce qui n'est pas le panel vers le chat
+- [x] `client/proxy.ts` : `/panel/...` répond 404 sans l'en-tête secret (port 1608 / Wi-Fi)
+- [x] Serveur : `/api/admin`, `/api/admin-auth` et les routes de modération du panel répondent 404 sans l'en-tête secret (comparaison à temps constant), **même avec un compte superadmin et un TOTP valides**
+- [x] Fermé par défaut : sans passerelle lancée, ou sans secret dans le `.env`, le panel est inaccessible
+- ⚠️ Production : NGINX jouera le rôle de la passerelle (vhost admin restreint par IP/VPN, qui ajoute l'en-tête). `ADMIN_GATEWAY_SECRET` est obligatoire en production (64 caractères min.)
 
 ## Lot 4 — Renforcement (🔜)
 
@@ -57,7 +80,7 @@ Next 14.2.35 cumule des failles **critiques d'exécution de code à distance**, 
 - [ ] **Avatars** : stocker en fichier (pas en base64 de 700 Ko dans la table `users`), refuser les URLs externes
 - [ ] **Fichiers uploadés** : les rattacher à l'utilisateur en base (traçabilité LCEN), quota de stockage
 - [ ] Indicateur « en train d'écrire » : vérifier l'appartenance au salon ; remplacer `KEYS` par `SCAN` dans Redis
-- [ ] Corriger les erreurs TypeScript existantes (77 serveur, 50 client) et ajouter `tsc --noEmit` comme garde-fou
+- [ ] Corriger les erreurs TypeScript du serveur (78 ; client ✅ 0) et ajouter `tsc --noEmit` comme garde-fou
 - [ ] Production : NGINX + HTTPS + HSTS, domaine séparé pour les fichiers uploadés, sauvegardes chiffrées
 
 ---

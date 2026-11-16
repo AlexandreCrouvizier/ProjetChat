@@ -44,13 +44,17 @@ cd server && npm run migrate && cd ..
 # Terminal 1 — Backend
 cd server && npm run dev
 
-# Terminal 2 — Frontend
-cd client && npm run dev
+# Terminal 2 — Frontend (chat)
+cd client && npm run dev        # ou npm run dev:lan pour le Wi-Fi
+
+# Terminal 3 — Panel admin (seulement quand tu en as besoin)
+cd client && npm run admin
 ```
 
 ## Accès
 
-- **Frontend** : http://localhost:3000
+- **Chat** : http://localhost:1608 (Wi-Fi : http://IP-du-PC:1608 avec `npm run dev:lan`)
+- **Panel admin** : http://localhost:2025 (ce PC uniquement, avec `npm run admin`)
 - **Backend API** : http://localhost:4000
 - **PostgreSQL** : localhost:5432
 - **Redis** : localhost:6379

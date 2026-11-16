@@ -20,6 +20,7 @@ import { MentionDropdown } from './MentionDropdown';
 import { GifPicker }       from './GifPicker';
 import { useMentions }     from '@/hooks/useMentions';
 import { uploadImage, uploadFile } from '@/lib/api';
+import { showModal } from '@/components/ui/AppModal';
 
 interface MessageInputProps {
   onSend:       (content: string) => Promise<void>;

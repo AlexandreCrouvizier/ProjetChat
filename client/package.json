@@ -3,27 +3,26 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "dev:lan": "next dev -H 0.0.0.0",
+    "dev": "next dev -p 1608",
+    "dev:lan": "next dev -H 0.0.0.0 -p 1608",
+    "admin": "node scripts/admin-gateway.mjs",
     "build": "next build",
-    "start": "next start",
-    "lint": "next lint"
+    "start": "next start -p 1608",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "next": "^14.2.0",
-    "react": "^18.3.0",
-    "react-dom": "^18.3.0",
+    "next": "16.4.6",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "socket.io-client": "^4.7.5",
     "zustand": "^4.5.0",
-    "axios": "^1.7.0",
-    "next-themes": "^0.3.0",
-    "clsx": "^2.1.0"
+    "axios": "^1.7.0"
   },
   "devDependencies": {
     "typescript": "^5.5.0",
     "@types/node": "^22.0.0",
-    "@types/react": "^18.3.0",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
     "tailwindcss": "^3.4.0",
     "postcss": "^8.4.0",
     "autoprefixer": "^10.4.0"

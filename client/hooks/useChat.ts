@@ -23,7 +23,7 @@ export interface ChatMessage {
   // ⭐ Phase 4.1 — Médias
   file_url: string | null;
   gif_url: string | null;
-  link_preview: { title: string; description: string; image: string | null; url: string; site_name: string | null } | null;
+  link_preview: { title: string; description: string | null; image: string | null; url: string; site_name: string | null } | null;
   is_pinned: boolean;
   is_hidden: boolean;
   reply_to_id: string | null;
@@ -105,7 +105,7 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
         return { ...msg, reactions: data.reactions.map(r => ({ emoji: r.emoji, count: r.count, reacted: currentUserId ? r.users.includes(currentUserId) : false })) };
       }));
     };
-    const onTypingUpdate = (data: { group_id: string; users: Array<{ id: string; username: string }> }) => {
+    const onTypingUpdate = (data: { group_id?: string; users: Array<{ id: string; username: string }> }) => {
       if (data.group_id === groupId) setTypingUsers(data.users);
     };
 
