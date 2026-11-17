@@ -14,6 +14,7 @@ import usersRoutes from './routes/users.routes';
 import moderationRoutes from './routes/moderation.routes';
 import adminRouter, { adminAuthRouter } from './routes/admin.routes';
 import uploadRoutes from './routes/upload.routes';
+import gifsRoutes from './routes/gifs.routes';
 import path from 'path';
 import { db } from './config/database';
 import { corsOrigin } from './utils/cors';
@@ -39,24 +40,8 @@ app.use('/api/groups', groupsRoutes);
 app.use('/api/conversations', conversationsRoutes);
 app.use('/api/users', usersRoutes);
 app.use('/api/moderation', moderationRoutes);
-// ⭐ Phase 4 : paramètres d'affichage GIF (publics, pas d'auth)
-app.get('/api/settings/gif-display', async (_req, res) => {
-  try {
-    const rows = await db('app_settings')
-      .whereIn('key', ['gif_display_guest', 'gif_display_registered', 'gif_display_premium', 'gif_picker_limit'])
-      .select('key', 'value');
-    const map: Record<string, string> = {};
-    for (const r of rows) map[r.key] = r.value;
-    res.json({
-      guest:      map['gif_display_guest']      ?? 'masked',
-      registered: map['gif_display_registered'] ?? 'option',
-      premium:    map['gif_display_premium']    ?? 'visible',
-      limit:      parseInt(map['gif_picker_limit'] ?? '20', 10),
-    });
-  } catch {
-    res.json({ guest: 'masked', registered: 'option', premium: 'visible', limit: 20 });
-  }
-});
+// ⭐ GIF : configuration publique + recherche via le serveur (la clé API ne quitte jamais le serveur)
+app.use('/api/gifs', gifsRoutes);
 
 // ⭐ Phase 4.1g : paramètres de la liste des membres (publics, pas d'auth)
 // Route perdue lors d'un patch précédent d'app.ts — utilisée par MembersPanel.tsx

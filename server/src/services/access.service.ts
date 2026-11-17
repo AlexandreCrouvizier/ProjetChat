@@ -12,6 +12,7 @@ import { groupRepository } from '../repositories/group.repository';
 import { conversationRepository } from '../repositories/conversation.repository';
 import { messageRepository } from '../repositories/message.repository';
 import { NotFoundError } from '../utils/errors';
+import type { Server as SocketIOServer } from 'socket.io';
 
 export async function canReadGroup(group: { id: string; type: string } | null | undefined, userId?: string): Promise<boolean> {
   if (!group) return false;
@@ -37,4 +38,25 @@ export async function assertCanReadMessage(messageId: string, userId?: string) {
     }
   }
   return message;
+}
+
+/**
+ * 🔐 Retire un utilisateur d'un salon EN TEMPS RÉEL (expulsion ou départ).
+ * Avant : il était retiré de la base, mais ses connexions WebSocket restaient dans la « room »
+ * du salon → un membre expulsé d'un salon privé continuait de recevoir tous les nouveaux messages
+ * jusqu'à sa prochaine reconnexion.
+ */
+export async function removeUserFromGroupRoom(
+  io: SocketIOServer | undefined,
+  group: { id: string; type: string },
+  userId: string,
+  username?: string,
+): Promise<void> {
+  if (!io) return;
+  const room = `group:${group.id}`;
+  io.in(`user:${userId}`).socketsLeave(room);
+  // Liste des membres à jour pour ceux qui restent
+  io.to(room).emit('group:member_left', { group_id: group.id, user_id: userId, username: username ?? '' });
+  // Salon privé : il disparaît de sa barre latérale (il n'y a plus accès)
+  if (group.type === 'private') io.to(`user:${userId}`).emit('group:deleted', { group_id: group.id });
 }

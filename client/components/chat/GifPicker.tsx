@@ -1,7 +1,7 @@
 /**
  * components/chat/GifPicker.tsx — version finale
  *
- * - Clé GIF via /api/config/gif (route serveur, lit .env racine)
+ * - 🔐 Recherche via le serveur (/api/gifs/search) : la clé API ne quitte jamais le serveur
  * - Limite configurable depuis app_settings (gif_picker_limit)
  * - Providers : Klipy > Giphy > Tenor
  * - Provider label dynamique
@@ -15,6 +15,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useGifConfig } from '@/hooks/useGifConfig';
+import api from '@/lib/api';
 
 interface GifResult {
   id:       string;
@@ -35,57 +36,17 @@ const PROVIDER_LABELS: Record<string, string> = {
   none:  '',
 };
 
-// ─── Fetch GIFs selon le provider ────────────────────────────────────────────
-async function fetchGifs(q: string, provider: string, key: string, limit: number): Promise<GifResult[]> {
+// ─── Recherche via le serveur ────────────────────────────────────────────────
+async function fetchGifs(q: string, limit: number): Promise<{ results: GifResult[]; error?: string }> {
   try {
-    if (provider === 'klipy') {
-      const base = 'https://api.klipy.com/v2';
-      const url = q.trim()
-        ? `${base}/search?q=${encodeURIComponent(q)}&key=${key}&limit=${limit}&media_filter=tinygif,gif&locale=fr_FR`
-        : `${base}/featured?key=${key}&limit=${limit}&media_filter=tinygif,gif&locale=fr_FR`;
-      const res  = await fetch(url);
-      const data = await res.json();
-      return (data?.results || []).map((item: any) => ({
-        id:       String(item.id),
-        title:    item.title || 'GIF',
-        preview:  item.media_formats?.tinygif?.url || item.media_formats?.nanogif?.url || item.media_formats?.gif?.url || '',
-        original: item.media_formats?.gif?.url     || item.media_formats?.tinygif?.url || '',
-      }));
-    }
-
-    if (provider === 'giphy') {
-      const base = 'https://api.giphy.com/v1/gifs';
-      const url = q.trim()
-        ? `${base}/search?api_key=${key}&q=${encodeURIComponent(q)}&limit=${limit}&lang=fr`
-        : `${base}/trending?api_key=${key}&limit=${limit}`;
-      const res  = await fetch(url);
-      const data = await res.json();
-      return (data?.data || []).map((item: any) => ({
-        id:       item.id,
-        title:    item.title || 'GIF',
-        preview:  item.images?.fixed_height_small?.url || item.images?.downsized?.url || '',
-        original: item.images?.original?.url           || item.images?.downsized?.url || '',
-      }));
-    }
-
-    if (provider === 'tenor') {
-      const base = 'https://tenor.googleapis.com/v2';
-      const url = q.trim()
-        ? `${base}/search?q=${encodeURIComponent(q)}&key=${key}&limit=${limit}&media_filter=tinygif,gif&locale=fr_FR`
-        : `${base}/featured?key=${key}&limit=${limit}&media_filter=tinygif,gif&locale=fr_FR`;
-      const res  = await fetch(url);
-      const data = await res.json();
-      return (data?.results || []).map((item: any) => ({
-        id:       item.id,
-        title:    item.title || 'GIF',
-        preview:  item.media_formats?.tinygif?.url || item.media_formats?.gif?.url || '',
-        original: item.media_formats?.gif?.url     || item.media_formats?.tinygif?.url || '',
-      }));
-    }
-  } catch {
-    return [];
+    const { data } = await api.get<{ results: GifResult[] }>('/gifs/search', { params: { q: q.trim(), limit } });
+    return { results: Array.isArray(data?.results) ? data.results : [] };
+  } catch (err: any) {
+    const status = err?.response?.status;
+    if (status === 429) return { results: [], error: 'Trop de recherches, patientez un instant.' };
+    if (status === 403) return { results: [], error: 'Les GIF sont réservés aux membres inscrits.' };
+    return { results: [], error: 'Le service de GIF ne répond pas pour le moment.' };
   }
-  return [];
 }
 
 // ─── Composant ───────────────────────────────────────────────────────────────
@@ -94,19 +55,21 @@ export function GifPicker({ onSelect, onClose }: GifPickerProps) {
   const [query,   setQuery]   = useState('');
   const [results, setResults] = useState<GifResult[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error,   setError]   = useState('');
   const debounceRef = useRef(null as NodeJS.Timeout | null);
   const inputRef    = useRef<HTMLInputElement>(null);
 
   const limit    = config?.display?.limit ?? 20;
   const provider = config?.provider ?? 'none';
-  const key      = config?.key ?? '';
 
   const load = useCallback(async (q: string) => {
     if (!config || provider === 'none') return;
     setLoading(true);
-    setResults(await fetchGifs(q, provider, key, limit));
+    const { results: found, error: err } = await fetchGifs(q, limit);
+    setResults(found);
+    setError(err ?? '');
     setLoading(false);
-  }, [config, provider, key, limit]);
+  }, [config, provider, limit]);
 
   useEffect(() => {
     if (config && provider !== 'none') {
@@ -193,6 +156,11 @@ export function GifPicker({ onSelect, onClose }: GifPickerProps) {
               {Array.from({ length: limit }).map((_, i) => (
                 <div key={i} className="aspect-square rounded-lg bg-white/10 animate-pulse" />
               ))}
+            </div>
+
+          ) : error ? (
+            <div className="flex items-center justify-center h-24 text-[var(--t3)] text-[12px] text-center px-4">
+              {error}
             </div>
 
           ) : results.length === 0 ? (

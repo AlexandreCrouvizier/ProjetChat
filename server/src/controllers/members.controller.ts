@@ -10,6 +10,8 @@
  */
 import type { Request, Response } from 'express';
 import { groupRepository } from '../repositories/group.repository';
+import { userRepository } from '../repositories/user.repository';
+import { removeUserFromGroupRoom } from '../services/access.service';
 
 const ROLE_HIERARCHY: Record<string, number> = {
   creator: 4,
@@ -120,6 +122,11 @@ export const membersController = {
 
       await groupRepository.removeMember(groupId, targetUserId);
       await groupRepository.decrementMemberCount(groupId);
+
+      // 🔐 Coupe aussi la réception en temps réel des messages du salon
+      const group = await groupRepository.findById(groupId);
+      const target = await userRepository.findById(targetUserId);
+      if (group) await removeUserFromGroupRoom(req.app.get('io'), group, targetUserId, target?.username);
 
       res.json({ message: 'Membre expulsé' });
     } catch (error: any) {

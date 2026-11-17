@@ -15,9 +15,6 @@ import { ADMIN_GATEWAY_HEADER, isAdminGatewayRequest } from '@/lib/adminGateway'
 
 const isDev = process.env.NODE_ENV !== 'production';
 
-// Fournisseurs de GIF appelés directement par le navigateur (GifPicker)
-const GIF_APIS = ['https://api.klipy.com', 'https://api.giphy.com', 'https://tenor.googleapis.com'];
-
 /** Adresse du serveur temps réel (Socket.io), même règle que client/lib/socket.ts */
 function realtimeSources(request: NextRequest): string[] {
   const configured = process.env.NEXT_PUBLIC_WS_URL;
@@ -48,7 +45,8 @@ function buildCsp(nonce: string, request: NextRequest): string {
     'img-src': ["'self'", 'data:', 'blob:', 'https:'],
     'media-src': ["'self'", 'blob:', 'https:'],
     'font-src': ["'self'", 'data:'],
-    'connect-src': ["'self'", ...realtimeSources(request), ...GIF_APIS],
+    // 🔐 Seulement notre site et le serveur temps réel (la recherche GIF passe par le serveur)
+    'connect-src': ["'self'", ...realtimeSources(request)],
     'worker-src': ["'self'", 'blob:'],
     'manifest-src': ["'self'"],
     'object-src': ["'none'"],

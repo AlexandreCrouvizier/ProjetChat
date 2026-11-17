@@ -16,7 +16,7 @@ import { getIpFromRequest } from '../utils/ip';
 import { AppError } from '../utils/errors';
 import { verifyRefreshToken } from '../utils/jwt';
 import {
-  COOKIE, readRequestCookie, setSessionCookies, clearSessionCookies, withoutTokens,
+  COOKIE, readRequestCookie, setSessionCookies, setGuestCookie, clearSessionCookies, withoutTokens,
 } from '../utils/authCookies';
 
 export const authController = {
@@ -86,11 +86,14 @@ export const authController = {
       const result = await authService.loginAsGuest({
         username,
         fingerprint: typeof fingerprint === 'string' ? fingerprint.substring(0, 80) : undefined,
+        // 🔐 Secret de reconnexion : lu UNIQUEMENT dans son cookie httpOnly (chemin /api/auth)
+        guestSecret: readRequestCookie(req, COOKIE.guest),
         ip: getIpFromRequest(req),
         userAgent: req.headers['user-agent'],
       });
 
       setSessionCookies(res, result);
+      if (result.guest_secret) setGuestCookie(res, result.guest_secret);
       res.status(201).json(withoutTokens(result));
     } catch (error: any) {
       handleError(res, error);

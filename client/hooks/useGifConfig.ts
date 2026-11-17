@@ -14,6 +14,7 @@
 
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '@/stores/authStore';
+import api from '@/lib/api';
 
 export interface GifDisplaySettings {
   guest:      'visible' | 'masked' | 'option';
@@ -22,9 +23,9 @@ export interface GifDisplaySettings {
   limit:      number;
 }
 
+// 🔐 Plus de clé API ici : la recherche passe par le serveur (/api/gifs/search)
 export interface GifConfig {
   provider: string;
-  key:      string;
   display:  GifDisplaySettings;
 }
 
@@ -36,9 +37,8 @@ async function loadGifConfig(): Promise<GifConfig> {
   if (cachedConfig) return cachedConfig;
   if (fetchPromise) return fetchPromise;
 
-  fetchPromise = fetch('/api/config/gif', { cache: 'no-store' })
-    .then(r => r.json())
-    .then((data: GifConfig) => {
+  fetchPromise = api.get<GifConfig>('/gifs/config')
+    .then(({ data }) => {
       cachedConfig = data;
       fetchPromise = null;
       return data;
@@ -47,7 +47,6 @@ async function loadGifConfig(): Promise<GifConfig> {
       fetchPromise = null;
       const fallback: GifConfig = {
         provider: 'none',
-        key: '',
         display: { guest: 'masked', registered: 'option', premium: 'visible', limit: 20 },
       };
       return fallback;

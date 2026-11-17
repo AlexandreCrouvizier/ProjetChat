@@ -20,8 +20,8 @@ const nextConfig = {
   // Utilisé uniquement en développement (ignoré en production).
   allowedDevOrigins: getLanAddresses(),
 
-  // 🔐 Les clés GIF ne sont plus recopiées dans le code du navigateur via `env` :
-  // elles étaient inutilisées côté client (la clé est servie par /api/config/gif).
+  // 🔐 Les clés GIF ne sont jamais dans le code du navigateur : la recherche passe par
+  // le serveur Express (/api/gifs/search), qui seul connaît la clé.
 
   // 🔐 L'optimiseur d'images de Next.js n'est pas utilisé (aucun next/image) : on le désactive.
   // Avant : remotePatterns '**' en faisait un proxy ouvert vers tout Internet.

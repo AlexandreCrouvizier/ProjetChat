@@ -15,6 +15,7 @@ import { conversationRepository } from '../repositories/conversation.repository'
 import { userRepository } from '../repositories/user.repository';
 import { moderationService } from './moderation.service';
 import { linkPreviewService } from './linkPreview.service';
+import { gifService } from './gif.service';
 import { checkRateLimit } from '../middleware/rateLimit.middleware';
 import { logAudit } from '../middleware/audit.middleware';
 import { BadRequestError, ForbiddenError, RateLimitError } from '../utils/errors';
@@ -100,8 +101,15 @@ export const messageService = {
       if (data.tier !== 'premium') throw new ForbiddenError('Le partage de fichiers est réservé aux membres Premium.');
       if (!data.fileUrl || !FILE_URL_RE.test(data.fileUrl)) throw new BadRequestError('Fichier invalide');
     }
-    if (messageType === 'gif' && !isSafeHttpsUrl(data.gifUrl)) {
-      throw new BadRequestError('GIF invalide');
+    if (messageType === 'gif') {
+      // 🔐 Les GIF sont réservés aux tiers qui y ont droit (avant : un invité pouvait en envoyer par WebSocket)
+      if (!TIER_LIMITS[data.tier as keyof typeof TIER_LIMITS]?.canUseGifs) {
+        throw new ForbiddenError('Les GIF sont réservés aux membres inscrits.');
+      }
+      // 🔐 Seules les URLs proposées par notre recherche GIF (ou hébergées par le fournisseur) sont acceptées
+      if (!isSafeHttpsUrl(data.gifUrl) || !(await gifService.isTrustedGifUrl(data.gifUrl))) {
+        throw new BadRequestError('GIF invalide');
+      }
     }
     // Un champ média ne peut accompagner que le type correspondant
     if (messageType !== 'image' && messageType !== 'file') data.fileUrl = undefined;

@@ -92,30 +92,60 @@ export function registerMessageHandlers(io: SocketIOServer, socket: Authenticate
     }
   });
 
-  // Typing
-  socket.on('typing:start', async (data: { group_id: string }) => {
-    if (tier === 'guest') return;
-    await redis.setex(`typing:${data.group_id}:${userId}`, 3, username);
-    const users = await getTypingUsers(data.group_id);
-    socket.to(`group:${data.group_id}`).emit('typing:update', { group_id: data.group_id, users });
-  });
+  // ── Indicateur « en train d'écrire » ──────────────────────────────────────
+  // 🔐 Avant : aucun contrôle → n'importe qui pouvait afficher « X écrit… » dans un salon privé
+  // dont il n'est pas membre, et chaque événement lançait un KEYS sur tout Redis (bloquant).
+  // Maintenant : identifiant valide + socket réellement dans le salon (rejoint après contrôle d'accès)
+  // + 1 événement par seconde maximum, et un ensemble Redis par salon (plus de KEYS).
+  let lastTypingAt = 0;
 
-  socket.on('typing:stop', async (data: { group_id: string }) => {
-    if (tier === 'guest') return;
-    await redis.del(`typing:${data.group_id}:${userId}`);
-    const users = await getTypingUsers(data.group_id);
-    socket.to(`group:${data.group_id}`).emit('typing:update', { group_id: data.group_id, users });
-  });
+  const handleTyping = async (data: { group_id?: unknown } | undefined, typing: boolean) => {
+    try {
+      if (tier === 'guest') return;
+      const groupId = data?.group_id;
+      if (typeof groupId !== 'string' || !UUID_RE.test(groupId)) return;
+      const room = `group:${groupId}`;
+      if (!socket.rooms.has(room)) return;
+      if (typing) {
+        const now = Date.now();
+        if (now - lastTypingAt < TYPING_MIN_INTERVAL_MS) return;
+        lastTypingAt = now;
+      }
+      const users = await updateTyping(groupId, userId, username, typing);
+      socket.to(room).emit('typing:update', { group_id: groupId, users });
+    } catch (error: any) {
+      console.error(`⚠️ [WS] typing (${username}):`, error?.message || error);
+    }
+  };
+
+  socket.on('typing:start', (data: { group_id?: unknown }) => { void handleTyping(data, true); });
+  socket.on('typing:stop',  (data: { group_id?: unknown }) => { void handleTyping(data, false); });
 }
 
-async function getTypingUsers(groupId: string) {
-  const keys = await redis.keys(`typing:${groupId}:*`);
-  const users: Array<{ id: string; username: string }> = [];
-  for (const key of keys) {
-    const uname = await redis.get(key);
-    if (uname) users.push({ id: key.split(':')[2], username: uname });
-  }
-  return users;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const TYPING_TTL_MS = 3000;           // « en train d'écrire » expire seul après 3 s sans nouvel événement
+const TYPING_MIN_INTERVAL_MS = 1000;  // anti-spam
+
+/**
+ * Met à jour la liste des personnes qui écrivent dans un salon et la renvoie.
+ * Un ensemble trié Redis par salon : membre = « id|pseudo », score = instant d'expiration.
+ */
+async function updateTyping(groupId: string, userId: string, username: string, typing: boolean) {
+  const key = `typing:${groupId}`;
+  const member = `${userId}|${username}`;
+  const now = Date.now();
+  const tx = redis.multi();
+  if (typing) tx.zadd(key, now + TYPING_TTL_MS, member);
+  else tx.zrem(key, member);
+  tx.zremrangebyscore(key, '-inf', now);
+  tx.zrange(key, 0, 49);
+  tx.pexpire(key, TYPING_TTL_MS * 2);
+  const results = await tx.exec();
+  const members = (results?.[2]?.[1] as string[] | undefined) ?? []; // 3ᵉ commande = zrange
+  return members.map((m) => {
+    const sep = m.indexOf('|');
+    return { id: m.slice(0, sep), username: m.slice(sep + 1) };
+  });
 }
 
 /** 🔐 Seules nos erreurs métier (AppError) sont montrées au client ; le reste reste dans les logs serveur */

@@ -25,6 +25,29 @@ import { VALIDATION } from '../../../shared/constants';
 import { hitLimit, resetLimit } from '../middleware/rateLimit.middleware';
 import { isBanActive } from './accessRevocation.service';
 
+// ── 🔐 Secret de reconnexion des invités ──────────────────────────────────────
+// 32 octets aléatoires (base64url, 43 caractères) ; la base n'en garde que le SHA-256.
+const GUEST_SECRET_RE = /^[A-Za-z0-9_-]{43}$/;
+
+function newGuestSecret(): string {
+  return crypto.randomBytes(32).toString('base64url');
+}
+
+function isWellFormedGuestSecret(value: unknown): value is string {
+  return typeof value === 'string' && GUEST_SECRET_RE.test(value);
+}
+
+function hashGuestSecret(secret: string): string {
+  return crypto.createHash('sha256').update(secret).digest('hex');
+}
+
+function guestBanMessage(user: { ban_reason?: string | null; ban_expires_at?: string | Date | null }): string {
+  const until = user.ban_expires_at
+    ? `jusqu'au ${new Date(user.ban_expires_at).toLocaleString('fr-FR', { timeZone: 'Europe/Paris', dateStyle: 'short', timeStyle: 'short' })}`
+    : 'définitivement';
+  return `Accès suspendu ${until}.${user.ban_reason ? ` Motif : ${user.ban_reason}` : ''}`;
+}
+
 // Nombre de rounds bcrypt (12 = bon compromis sécurité/performance)
 const BCRYPT_ROUNDS = 12;
 
@@ -172,6 +195,7 @@ export const authService = {
   async loginAsGuest(data: {
     username?: string;
     fingerprint?: string;
+    guestSecret?: string;
     ip: string;
     userAgent?: string;
   }) {
@@ -203,38 +227,30 @@ export const authService = {
       }
     }
 
-    // ── 1. Reconnexion d'un invité existant via son fingerprint ──────────────
-    // Si le fingerprint existe déjà en BDD → reconnexion (même invité qui revient)
+    // ── 1. Reconnexion par le secret serveur (cookie httpOnly chatapp_guest) ──
+    // 🔐 Avant : l'empreinte navigateur suffisait (lisible par JavaScript, choisie par le client).
+    // Maintenant seul le détenteur du secret, invisible pour les scripts de la page, retrouve le compte.
+    const secretHash = isWellFormedGuestSecret(data.guestSecret) ? hashGuestSecret(data.guestSecret) : null;
+    if (secretHash) {
+      const existing = await db('users').where({ guest_secret_hash: secretHash, tier: 'guest' }).first();
+      if (existing) {
+        // Banni : refusé même si l'empreinte navigateur a été effacée (le cookie, lui, est resté)
+        if (isBanActive(existing)) throw new ValidationError(guestBanMessage(existing), 'guest');
+        return this.resumeGuest(existing, data, 'guest_reconnect');
+      }
+    }
+
+    // ── 1 bis. Invité créé AVANT le secret serveur : reconnexion une seule fois par l'empreinte ──
+    // Le secret lui est attribué aussitôt : ensuite, l'empreinte seule ne suffit plus.
     if (data.fingerprint) {
-      const existingByFp = await db('users')
+      const legacy = await db('users')
         .where({ guest_fingerprint: data.fingerprint, tier: 'guest' })
-        .whereNull('ban_expires_at')
-        .where(q => q.where('is_banned', false).orWhereNull('is_banned'))
-        .select('*')
+        .whereNull('guest_secret_hash')
         .first();
-
-      if (existingByFp) {
-        // Mettre à jour la dernière IP
-        await db('users').where({ id: existingByFp.id }).update({
-          last_ip: data.ip,
-          last_seen_at: db.fn.now(),
-        });
-
-        // Log sécurité
-        await guestSecurityService.logConnection({
-          fingerprint: data.fingerprint,
-          userId:      existingByFp.id,
-          ip:          data.ip,
-          userAgent:   data.userAgent,
-        });
-
-        await logAudit('login', data.ip, existingByFp.id, { method: 'guest_reconnect', fingerprint: data.fingerprint }, data.userAgent);
-
-        const payload = { userId: existingByFp.id, username: existingByFp.username, tier: 'guest' };
-        return {
-          user: this.sanitizeUser(existingByFp),
-          access_token: generateAccessToken(payload),
-        };
+      if (legacy && !isBanActive(legacy)) {
+        const guestSecret = newGuestSecret();
+        await db('users').where({ id: legacy.id }).update({ guest_secret_hash: hashGuestSecret(guestSecret) });
+        return { ...(await this.resumeGuest(legacy, data, 'guest_reconnect_legacy')), guest_secret: guestSecret };
       }
     }
 
@@ -275,11 +291,13 @@ export const authService = {
     }
 
     // ── 3. Créer le nouveau compte invité ─────────────────────────────────
+    const guestSecret = newGuestSecret();
     const user = await userRepository.create({
       username,
       tier: 'guest',
       last_ip: data.ip,
       guest_fingerprint: data.fingerprint || null,
+      guest_secret_hash: hashGuestSecret(guestSecret),
     } as any);
 
     // Log sécurité
@@ -301,6 +319,39 @@ export const authService = {
     return {
       user: this.sanitizeUser(user),
       access_token: accessToken,
+      guest_secret: guestSecret, // → cookie httpOnly (retiré de la réponse JSON par le contrôleur)
+    };
+  },
+
+  /** Reconnexion d'un invité existant (secret valide, ou ancienne empreinte) */
+  async resumeGuest(
+    user: any,
+    data: { fingerprint?: string; ip: string; userAgent?: string },
+    method: 'guest_reconnect' | 'guest_reconnect_legacy',
+  ) {
+    await db('users').where({ id: user.id }).update({
+      last_ip: data.ip,
+      last_seen_at: db.fn.now(),
+      // Empreinte la plus récente de cet appareil (utilisée par les bans d'invités)
+      ...(data.fingerprint ? { guest_fingerprint: data.fingerprint } : {}),
+    });
+
+    if (data.fingerprint) {
+      await guestSecurityService.logConnection({
+        fingerprint: data.fingerprint,
+        userId:      user.id,
+        ip:          data.ip,
+        userAgent:   data.userAgent,
+      });
+    }
+
+    await logAudit('login', data.ip, user.id, { method, fingerprint: data.fingerprint }, data.userAgent);
+
+    const payload = { userId: user.id, username: user.username, tier: 'guest' };
+    return {
+      user: this.sanitizeUser(user),
+      access_token: generateAccessToken(payload),
+      guest_secret: undefined as string | undefined, // secret inchangé : le cookie existant reste valable
     };
   },
 

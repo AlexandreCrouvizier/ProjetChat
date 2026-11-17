@@ -1,0 +1,2 @@
+# Les hooks Git sont des scripts shell : fins de ligne Unix obligatoires, même sous Windows
+.githooks/* text eol=lf

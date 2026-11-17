@@ -8,6 +8,7 @@
  *  - chatapp_at    : jeton d'accès (15 min), envoyé partout (API + WebSocket)
  *  - chatapp_rt    : jeton de renouvellement (7 j), envoyé UNIQUEMENT à /api/auth
  *  - chatapp_admin : jeton du panel (30 min, après TOTP), envoyé UNIQUEMENT à /api
+ *  - chatapp_guest : secret de reconnexion d'un invité (1 an), envoyé UNIQUEMENT à /api/auth
  *
  * SameSite=Strict : jamais envoyés depuis un autre site (protection CSRF).
  * Secure en production : jamais envoyés en HTTP non chiffré.
@@ -21,9 +22,13 @@ export const COOKIE = {
   access: 'chatapp_at',
   refresh: 'chatapp_rt',
   admin: 'chatapp_admin',
+  guest: 'chatapp_guest',
 } as const;
 
-const PATHS = { access: '/', refresh: '/api/auth', admin: '/api' } as const;
+const PATHS = { access: '/', refresh: '/api/auth', admin: '/api', guest: '/api/auth' } as const;
+
+/** Durée de vie du secret de reconnexion invité (un invité garde son pseudo pendant 1 an) */
+export const GUEST_SECRET_MAX_AGE_MS = 365 * 24 * 3600 * 1000;
 
 function baseOptions(path: string): CookieOptions {
   return { httpOnly: true, sameSite: 'strict', secure: !env.isDev, path };
@@ -54,6 +59,14 @@ export function setAdminCookie(res: Response, adminToken: string): void {
   });
 }
 
+/**
+ * 🔐 Secret de reconnexion invité : remplace l'empreinte navigateur comme « clé » du compte invité.
+ * Volontairement conservé à la déconnexion (comme avant, l'invité retrouve son pseudo en revenant).
+ */
+export function setGuestCookie(res: Response, guestSecret: string): void {
+  res.cookie(COOKIE.guest, guestSecret, { ...baseOptions(PATHS.guest), maxAge: GUEST_SECRET_MAX_AGE_MS });
+}
+
 export function clearAdminCookie(res: Response): void {
   res.clearCookie(COOKIE.admin, baseOptions(PATHS.admin));
 }
@@ -64,9 +77,9 @@ export function clearSessionCookies(res: Response): void {
   clearAdminCookie(res);
 }
 
-/** Retire les jetons d'une réponse JSON : le navigateur ne doit jamais les voir */
-export function withoutTokens<T extends Record<string, unknown>>(result: T): Omit<T, 'access_token' | 'refresh_token'> {
-  const { access_token: _a, refresh_token: _r, ...rest } = result;
+/** Retire les jetons (et le secret invité) d'une réponse JSON : le navigateur ne doit jamais les voir */
+export function withoutTokens<T extends Record<string, unknown>>(result: T): Omit<T, 'access_token' | 'refresh_token' | 'guest_secret'> {
+  const { access_token: _a, refresh_token: _r, guest_secret: _g, ...rest } = result;
   return rest;
 }
 

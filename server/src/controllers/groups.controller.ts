@@ -4,7 +4,7 @@
 import type { Request, Response } from 'express';
 import { groupRepository } from '../repositories/group.repository';
 import { invitationRepository } from '../repositories/invitation.repository';
-import { canReadGroup } from '../services/access.service';
+import { canReadGroup, removeUserFromGroupRoom } from '../services/access.service';
 import { VALIDATION, TIER_LIMITS } from '../../../shared/constants';
 
 export const groupsController = {
@@ -243,6 +243,8 @@ export const groupsController = {
 
       await groupRepository.removeMember(id, userId);
       await groupRepository.decrementMemberCount(id);
+      // 🔐 Plus de messages du salon en temps réel après l'avoir quitté
+      await removeUserFromGroupRoom(req.app.get('io'), group, userId, req.user!.username);
       res.json({ message: 'Salon quitté' });
     } catch (error: any) {
       res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Erreur serveur' });

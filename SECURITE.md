@@ -123,18 +123,31 @@ Symptôme : le banni voyait un message, cliquait « OK » et restait sur la page
   API 403) : état vidé, cookies effacés, rechargement complet vers l'accueil, motif affiché sur l'accueil.
 - Testé : 14/14 (API + navigateur en ligne + téléphone hors ligne pendant le ban) et 26/26 e2e.
 
-## Lot 4 — Renforcement, partie 2 (🔜)
+## Lot 4.2a — Renforcement, partie 2a (✅ fait le 17/11/2026)
 
-- [ ] **Clé API GIF** : appels via le serveur (aujourd'hui la clé est envoyée au navigateur)
-- [ ] **Empreinte invité** : elle sert aussi de « clé » de reconnexion → la lier à un secret serveur
+Vérifié par **35 nouveaux tests automatisés** (`outils-tests/e2e-lot42a.mjs`) + **5 tests navigateur** (`e2e-gif-navigateur.mjs`),
+en plus des 26 + 14 existants (toujours au vert).
+
+| # | Gravité | Faille | Correction |
+|---|---|---|---|
+| 19 | 🟠 Élevée | **Clé API GIF envoyée au navigateur** (`/api/config/gif`) : copiable par n'importe quel visiteur, quota épuisable | Recherche via le serveur `GET /api/gifs/search` (inscrits/premium, 60/min, cache 5 min, réponse ≤ 2 Mo). Ancienne route supprimée. CSP `connect-src` réduite à notre site + serveur temps réel (`services/gif.service.ts`, `routes/gifs.routes.ts`) |
+| 20 | 🟠 Élevée | **« GIF » = n'importe quelle image https** : un membre pouvait poster une image hébergée chez lui et récupérer l'IP de tous les lecteurs | URL acceptée seulement si proposée par notre recherche (mémorisée 24 h) ou hébergée par le fournisseur (`isTrustedGifUrl`) |
+| 21 | 🟡 Moyenne | **Invités : GIF envoyables par WebSocket** malgré `canUseGifs: false` | Contrôle du tier côté serveur (`message.service.ts`) |
+| 22 | 🟠 Élevée | **Compte invité usurpable** : l'empreinte navigateur (lisible par JavaScript, choisie par le client) suffisait à reprendre le compte | Secret aléatoire dans un cookie **httpOnly** `chatapp_guest` (1 an, `Path=/api/auth`), seul son SHA-256 en base (`users.guest_secret_hash`, migration 9). Anciens invités : reconnexion une seule fois par l'empreinte, puis secret attribué. Ban vérifié aussi via le cookie (effacer l'empreinte ne suffit plus) |
+| 23 | 🟠 Élevée | **Membre expulsé d'un salon privé : continuait de recevoir les messages en direct** (retiré de la base, pas de la « room » WebSocket) | `removeUserFromGroupRoom()` (`services/access.service.ts`) à l'expulsion et au départ : sortie de la room + liste des membres à jour + salon retiré de sa barre latérale |
+| 24 | 🟡 Moyenne | **« En train d'écrire »** : affichable dans un salon privé dont on n'est pas membre ; `KEYS` sur tout Redis à chaque frappe (blocage possible) ; aucune limite | Identifiant validé, socket réellement dans le salon, 1 événement/s, ensemble trié Redis par salon (plus de `KEYS`) |
+| 25 | 🟢 Faible | Aucune vérification avant commit | Hook Git `.githooks/pre-commit` : refuse les fichiers `.env*` (sauf `.env.example`) et lance `typecheck` (client et/ou serveur) |
+
+**Bug trouvé en route** : les événements WebSocket envoyés dès la connexion (ex. `group:join` à l'ouverture d'un salon)
+pouvaient être **perdus** (gestionnaires enregistrés après plusieurs accès base/Redis) → enregistrés immédiatement (`websocket/index.ts`).
+
+## Lot 4 — Renforcement, partie 2b et suite (🔜)
+
 - [ ] **Avatars** : stocker en fichier (pas en base64 de 700 Ko dans la table `users`), refuser les URLs externes
 - [ ] **Fichiers uploadés** : les rattacher à l'utilisateur en base (traçabilité LCEN), quota de stockage
-- [ ] Indicateur « en train d'écrire » : vérifier l'appartenance au salon ; remplacer `KEYS` par `SCAN` dans Redis
-- [ ] Lancer `npm run typecheck` automatiquement avant chaque commit (hook Git) ou en intégration continue
 - [ ] Invités : jeton de renouvellement (aujourd'hui, reconnexion obligatoire après 15 min d'inactivité du WebSocket)
+- [ ] **Images des aperçus de liens** chargées directement depuis les sites tiers (`img-src https:`) → même risque de traçage d'IP que les faux GIF : les servir via notre serveur, puis restreindre `img-src`
 - [ ] Production : NGINX + HTTPS + HSTS, domaine séparé pour les fichiers uploadés, sauvegardes chiffrées
-
----
 
 ## Règles à respecter pour la suite du développement
 
@@ -146,5 +159,7 @@ Symptôme : le banni voyait un message, cliquait « OK » et restait sur la page
 6. **IP du client** : toujours `getIpFromRequest()` / `getIpFromSocket()`, jamais `req.ip` ni l'en-tête brut.
 7. **Jetons de session** : uniquement via `utils/authCookies.ts` (cookies httpOnly). Jamais de jeton dans une réponse JSON, une URL ou `localStorage`.
 8. **Pas de script inline** dans le client : la CSP le bloquerait. Si c'est indispensable, lui passer le `nonce` (voir `ThemeInitScript`).
-9. **Nouvelle API externe appelée par le navigateur** : l'ajouter à `connect-src` dans `client/proxy.ts`.
-10. **Avant chaque commit** : `npm run typecheck` dans `client/` et `server/` doit afficher 0 erreur.
+9. **API externe avec une clé** : toujours appelée **par le serveur** (comme `/api/gifs/search`), jamais par le navigateur. Une API sans secret appelée par le navigateur doit être ajoutée à `connect-src` dans `client/proxy.ts`.
+10. **Avant chaque commit** : `npm run typecheck` dans `client/` et `server/` doit afficher 0 erreur (vérifié automatiquement par le hook `.githooks/pre-commit`).
+11. **Retirer quelqu'un d'un salon** (expulsion, départ, suppression de droits) : appeler `removeUserFromGroupRoom()` en plus de la base, sinon il continue de recevoir les messages en direct.
+12. **Événements WebSocket** : gestionnaires enregistrés dès la connexion (avant tout `await`), et chaque événement vérifie ses données et l'appartenance (`socket.rooms`) avant d'agir.

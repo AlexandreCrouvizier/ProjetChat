@@ -56,6 +56,12 @@ export const env = {
   // 🔐 Clé de chiffrement des secrets TOTP en base (64 caractères hexadécimaux).
   // Ne JAMAIS la changer une fois des secrets créés : sinon il faut reconfigurer le TOTP.
   TOTP_ENCRYPTION_KEY: process.env.TOTP_ENCRYPTION_KEY || '',
+
+  // 🔐 Clés des fournisseurs de GIF : lues UNIQUEMENT par le serveur (jamais envoyées au navigateur).
+  // Une seule suffit — priorité : Klipy > Giphy > Tenor.
+  GIF_KLIPY_API_KEY: process.env.GIF_KLIPY_API_KEY || '',
+  GIF_GIPHY_API_KEY: process.env.GIF_GIPHY_API_KEY || '',
+  GIF_TENOR_API_KEY: process.env.GIF_TENOR_API_KEY || '',
 };
 
 // Vérifie les variables critiques en production

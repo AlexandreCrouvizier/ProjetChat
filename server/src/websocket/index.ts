@@ -46,6 +46,13 @@ export function setupWebSocket(io: SocketIOServer): void {
     // Room personnelle
     socket.join(`user:${userId}`);
 
+    // Handlers — 🐛 enregistrés AVANT toute attente (base, Redis) : avant, un événement envoyé
+    // dès la connexion (ex. group:join à l'ouverture d'un salon) arrivait trop tôt et était perdu.
+    registerMessageHandlers(io, socket);
+    registerGroupHandlers(io, socket, socket.user);
+    registerReactionHandlers(io, socket);
+    registerConversationHandlers(io, socket);
+
     // Rooms des groupes
     try {
       const groupIds = await groupRepository.getGroupIdsForUser(userId);
@@ -88,12 +95,6 @@ export function setupWebSocket(io: SocketIOServer): void {
       });
       console.log(`🚪 [WS] ${username} déconnexion volontaire`);
     });
-
-    // Handlers
-    registerMessageHandlers(io, socket);
-    registerGroupHandlers(io, socket, socket.user);
-    registerReactionHandlers(io, socket);
-    registerConversationHandlers(io, socket);
 
     // ⭐ Déconnexion réseau (fermeture onglet, perte connexion, etc.)
     socket.on('disconnect', async (reason) => {

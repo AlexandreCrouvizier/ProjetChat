@@ -1,0 +1,41 @@
+#!/bin/sh
+# ─────────────────────────────────────────────────────────────────────────────
+# Hook Git « pre-commit » — ChatApp
+#  1. Refuse de committer un fichier .env (secrets), même forcé avec git add -f.
+#  2. Lance `npm run typecheck` dans client/ et/ou server/ si des fichiers concernés
+#     sont dans le commit (règle n°10 de SECURITE.md). Une erreur TypeScript = commit annulé.
+#
+# Activation (une seule fois, à la racine du dépôt) : git config core.hooksPath .githooks
+# Contournement exceptionnel (déconseillé)         : git commit --no-verify
+# ─────────────────────────────────────────────────────────────────────────────
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR)
+[ -z "$staged" ] && exit 0
+
+# 1. Secrets
+secrets=$(echo "$staged" | grep -E '(^|/)\.env(\..+)?$' | grep -vE '\.env\.example$')
+if [ -n "$secrets" ]; then
+  echo "❌ Commit refusé : fichier de secrets dans le commit :"
+  echo "$secrets" | sed 's/^/   - /'
+  echo "   Retire-le avec : git restore --staged <fichier>"
+  exit 1
+fi
+
+# 2. Vérification des types
+check() {
+  dir="$1"
+  if [ ! -d "$dir/node_modules" ]; then
+    echo "❌ $dir/node_modules absent : lance d'abord « npm install » dans $dir/."
+    exit 1
+  fi
+  echo "🔎 Vérification des types : $dir/ …"
+  if ! (cd "$dir" && npm run --silent typecheck); then
+    echo "❌ Erreurs TypeScript dans $dir/ : commit annulé (corrige-les, puis recommence)."
+    exit 1
+  fi
+  echo "✅ $dir/ : 0 erreur"
+}
+
+echo "$staged" | grep -qE '^(client|shared)/' && check client
+echo "$staged" | grep -qE '^(server|shared)/' && check server
+exit 0
