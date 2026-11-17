@@ -18,6 +18,8 @@ import {
 import { EmojiPicker }     from './EmojiPicker';
 import { MentionDropdown } from './MentionDropdown';
 import { GifPicker }       from './GifPicker';
+import { MyFilesModal }    from '@/components/files/MyFilesModal';
+import type { GalleryItem } from '@/lib/files';
 import { useMentions }     from '@/hooks/useMentions';
 import { uploadImage, uploadFile } from '@/lib/api';
 import { showModal } from '@/components/ui/AppModal';
@@ -30,6 +32,9 @@ interface MessageInputProps {
   disabled?:    boolean;
   groupId?:     string | null;
   currentTier?: string;
+  /** Fichier déposé ailleurs dans la zone de discussion : mis en attente ici (comme un dépôt dans la barre) */
+  droppedFile?:      File | null;
+  onDroppedFileUsed?: () => void;
 }
 
 interface StagedFile {
@@ -65,7 +70,7 @@ function isImageFile(file: File): boolean {
 // ─── Composant ───────────────────────────────────────────────────────────────
 
 export function MessageInput({
-  onSend, onSendMedia, onTyping, channelName, disabled, groupId, currentTier,
+  onSend, onSendMedia, onTyping, channelName, disabled, groupId, currentTier, droppedFile, onDroppedFileUsed,
 }: MessageInputProps) {
   const [content,        setContent]        = useState('');
   const [sending,        setSending]        = useState(false);
@@ -73,6 +78,7 @@ export function MessageInput({
   const [uploadError,    setUploadError]    = useState(null as string | null);
   const [showAttachMenu, setShowAttachMenu] = useState(false);
   const [showGifPicker,  setShowGifPicker]  = useState(false);
+  const [showMyFiles,    setShowMyFiles]    = useState(false);
   const [staged,         setStaged]         = useState(null as StagedFile | null);
   const [isDragOver,     setIsDragOver]     = useState(false);
 
@@ -80,6 +86,10 @@ export function MessageInput({
   const imageInputRef = useRef(null as HTMLInputElement | null);
   const fileInputRef  = useRef(null as HTMLInputElement | null);
   const attachBtnRef  = useRef(null as HTMLButtonElement | null);
+  /** Bouton 📎 + son menu : un clic dans le menu ne doit pas le fermer avant d'être pris en compte */
+  const attachWrapRef = useRef(null as HTMLDivElement | null);
+  /** Verrou d'envoi immédiat (un double clic ou Entrée + clic ne doit jamais envoyer deux fois) */
+  const sendingRef    = useRef(false);
 
   const { suggestions, isOpen, handleInputChange, selectMention, closeSuggestions } = useMentions(groupId || null);
   const isPremium    = currentTier === 'premium';
@@ -99,7 +109,7 @@ export function MessageInput({
   useEffect(() => {
     if (!showAttachMenu) return;
     const handler = (e: MouseEvent) => {
-      if (attachBtnRef.current && !attachBtnRef.current.contains(e.target as Node))
+      if (attachWrapRef.current && !attachWrapRef.current.contains(e.target as Node))
         setShowAttachMenu(false);
     };
     setTimeout(() => document.addEventListener('mousedown', handler), 0);
@@ -139,6 +149,13 @@ export function MessageInput({
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [disabled, uploading, currentTier]);
 
+  // Fichier déposé ailleurs dans la zone de discussion → même traitement qu'un dépôt dans la barre
+  useEffect(() => {
+    if (!droppedFile) return;
+    stageFile(droppedFile);
+    onDroppedFileUsed?.();
+  }, [droppedFile, stageFile, onDroppedFileUsed]);
+
   const cancelStaged = useCallback(() => {
     setStaged(null);
     setUploadError(null);
@@ -147,11 +164,12 @@ export function MessageInput({
   // ─── Envoi (texte seul ou média stagé + légende) ──────────────────────────
 
   const handleSend = useCallback(async () => {
-    if (sending || disabled || uploading) return;
+    if (sendingRef.current || sending || disabled || uploading) return;
 
     // Cas 1 : fichier stagé → upload + envoi
     if (staged) {
       if (staged.file.size === 0) return;
+      sendingRef.current = true;
       setSending(true);
       setUploading(true);
       try {
@@ -160,7 +178,8 @@ export function MessageInput({
         await onSendMedia({
           type: staged.uploadType,
           file_url: url,
-          content: content.trim() || staged.file.name,
+          // Image sans texte → image seule (pas de nom de fichier en guise de message)
+          content: content.trim() || (staged.uploadType === 'file' ? staged.file.name : ''),
         });
         setStaged(null);
         setContent('');
@@ -169,6 +188,7 @@ export function MessageInput({
       }
       setUploading(false);
       setSending(false);
+      sendingRef.current = false;
       inputRef.current?.focus();
       return;
     }
@@ -176,11 +196,36 @@ export function MessageInput({
     // Cas 2 : texte seul
     if (!content.trim()) return;
     closeSuggestions();
+    sendingRef.current = true;
     setSending(true);
     try { await onSend(content); setContent(''); } catch {}
     setSending(false);
+    sendingRef.current = false;
     inputRef.current?.focus();
   }, [sending, disabled, uploading, staged, content, onSend, onSendMedia, closeSuggestions]);
+
+  // ─── Renvoi d'un fichier déjà envoyé (galerie « Mes fichiers ») ─────────────
+  // Aucun nouvel envoi : le serveur vérifie que le fichier appartient bien à l'auteur.
+  const handlePickExisting = useCallback(async (item: GalleryItem) => {
+    setShowMyFiles(false);
+    if (sendingRef.current || sending || disabled) return;
+    sendingRef.current = true;
+    setSending(true);
+    setUploadError(null);
+    try {
+      await onSendMedia({
+        type: item.kind,
+        file_url: item.url,
+        content: content.trim() || (item.kind === 'file' ? (item.original_name || '') : ''),
+      });
+      setContent('');
+    } catch (err: any) {
+      setUploadError(err?.message || 'Envoi impossible');
+    }
+    setSending(false);
+    sendingRef.current = false;
+    inputRef.current?.focus();
+  }, [sending, disabled, content, onSendMedia]);
 
   // ─── Keyboard ────────────────────────────────────────────────────────────
 
@@ -246,6 +291,7 @@ export function MessageInput({
 
   const handleDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation(); // la zone de discussion ne doit pas traiter ce dépôt une 2ᵉ fois
     setIsDragOver(false);
     if (disabled) return;
     const file = e.dataTransfer.files?.[0];
@@ -343,7 +389,7 @@ export function MessageInput({
         <MentionDropdown suggestions={suggestions} isOpen={isOpen} onSelect={handleMentionSelect} onClose={closeSuggestions} />
 
         {/* Bouton 📎 */}
-        <div className="relative flex-shrink-0">
+        <div ref={attachWrapRef} className="relative flex-shrink-0">
           <button ref={attachBtnRef} disabled={disabled || uploading}
             onClick={() => setShowAttachMenu(v => !v)}
             className={`w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
@@ -393,6 +439,20 @@ export function MessageInput({
                 </div>
               </button>
               <div className="h-px bg-[var(--border)] mx-2" />
+              <button
+                onClick={() => {
+                  setShowAttachMenu(false);
+                  if (!isRegistered) { showModal('Le partage de médias est réservé aux membres inscrits.', 'warning'); return; }
+                  setShowMyFiles(true);
+                }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 text-[13px] transition-colors text-left ${isRegistered ? 'text-[var(--t1)] hover:bg-[var(--glass-h)]' : 'text-[var(--t3)] cursor-default'}`}>
+                <span>🗂️</span>
+                <div>
+                  <div className="font-medium">Mes fichiers</div>
+                  <div className="text-[10px] text-[var(--t3)]">Renvoyer sans nouvel envoi</div>
+                </div>
+              </button>
+              <div className="h-px bg-[var(--border)] mx-2" />
               <div className="px-3 py-1.5 text-[10px] text-[var(--t3)]">💡 Glisser-déposer aussi supporté</div>
             </div>
           )}
@@ -430,6 +490,10 @@ export function MessageInput({
           ➤
         </button>
       </div>
+
+      {/* Galerie « Mes fichiers » : renvoyer un fichier déjà envoyé */}
+      <MyFilesModal isOpen={showMyFiles} onClose={() => setShowMyFiles(false)} mode="pick"
+        pickKinds={isPremium ? ['image', 'file'] : ['image']} onPick={handlePickExisting} />
 
       {/* GifPicker */}
       {showGifPicker && (

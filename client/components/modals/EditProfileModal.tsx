@@ -12,7 +12,7 @@ const AVATAR_MAX_BYTES = 5 * 1024 * 1024; // 5 Mo (le serveur le réduit en 256�
 import { useAuthStore } from '@/stores/authStore';
 import { useGifConfig, invalidateGifConfigCache } from '@/hooks/useGifConfig';
 
-interface EditProfileModalProps { isOpen: boolean; onClose: () => void; }
+interface EditProfileModalProps { isOpen: boolean; onClose: () => void; /** Ouvre la galerie « Mes fichiers » */ onOpenFiles?: () => void; }
 
 const STATUS_PRESETS = [
   { emoji: '🟢', text: 'En ligne' },
@@ -28,7 +28,7 @@ const STATUS_PRESETS = [
 const STATUS_EMOJIS = ['😀','😎','🤓','🎮','💼','🎵','📚','😴','🍕','🏃','🔥','❤️','⭐','🌙','☀️','🎯','🎨','✈️','🏠','💻'];
 const BIO_MAX = 500;
 
-export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
+export function EditProfileModal({ isOpen, onClose, onOpenFiles }: EditProfileModalProps) {
   const { user, setUser } = useAuthStore();
   const [username, setUsername] = useState('');
   const [bio, setBio] = useState('');
@@ -171,7 +171,12 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
                 {avatarPreview && <button onClick={handleDeleteAvatar} className="text-xs text-red-400 hover:underline ml-3">Supprimer</button>}
                 <p className="text-[10px] text-[var(--t3)] mt-0.5">JPG, PNG, WEBP, GIF — 5 Mo max (recadré en 256×256)</p>
                 {storage && (
-                  <p className="text-[10px] text-[var(--t3)] mt-0.5">Espace utilisé : {storage.used_readable} sur {storage.quota_readable}</p>
+                  <p className="text-[10px] text-[var(--t3)] mt-0.5">
+                    Espace utilisé : {storage.used_readable} sur {storage.quota_readable}
+                    {onOpenFiles && (
+                      <> · <button type="button" onClick={onOpenFiles} className="text-[var(--acc)] hover:underline">📁 Mes fichiers</button></>
+                    )}
+                  </p>
                 )}
               </div>
               <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handleAvatarChange} className="hidden" />

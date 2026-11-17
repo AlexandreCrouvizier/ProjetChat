@@ -12,6 +12,7 @@ import { ReactionBar } from './ReactionBar';
 import { MessageContent } from './MessageContent';
 import { ThreadView } from './ThreadView';
 import { safeAvatarUrl } from '@/lib/safeUrl';
+import { hiddenMessageLabel } from '@/lib/files';
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -120,7 +121,7 @@ export function MessageList({ messages, isLoading, hasMore, onLoadMore, onToggle
           );
         }
 
-        // ⭐ MESSAGE MASQUÉ PAR LA MODÉRATION
+        // ⭐ MESSAGE MASQUÉ (par son auteur ou par la modération)
         if (isHidden) {
           const isThreadOpen = openThreadId === msg.id;
           return (
@@ -137,7 +138,7 @@ export function MessageList({ messages, isLoading, hasMore, onLoadMore, onToggle
                   </div>
                   <div className="text-[12px] text-[var(--t3)] italic flex items-center gap-1.5">
                     <span className="inline-block w-1 h-1 rounded-full bg-red-400/40" />
-                    Ce message a été supprimé par la modération.
+                    {hiddenMessageLabel(msg.hidden_by)}
                   </div>
 
                   {/* ⭐ Le thread reste accessible même si le message parent est masqué */}
@@ -190,7 +191,7 @@ export function MessageList({ messages, isLoading, hasMore, onLoadMore, onToggle
                 <div className="text-[13px] text-[var(--t2)] leading-relaxed break-words">
                   <MessageContent content={msg.content} type={msg.type}
                     file_url={msg.file_url} gif_url={msg.gif_url} link_preview={msg.link_preview}
-                    currentUsername={currentUsername} />
+                    media_removed={(msg as any).media_removed} currentUsername={currentUsername} />
                 </div>
 
                 {(msg.thread_count > 0 || isThreadOpen) && (

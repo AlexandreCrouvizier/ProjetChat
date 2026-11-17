@@ -28,6 +28,8 @@ export interface ServerToClientEvents {
   'message:edited': (data: { message_id: string; content: string; edited_at: string }) => void;
   'message:deleted': (data: { message_id: string }) => void;
   'message:hidden': (data: MessageHiddenPayload) => void;
+  /** Image / fichier d'un message effacé après coup (par son auteur ou par la modération) */
+  'message:media_removed': (data: { message_id: string; media_removed: 'author' | 'moderation' | 'expired' }) => void;
   'thread:new_reply': (data: { parent_message_id: string; message: Message }) => void;
   'thread:count_update': (data: { message_id: string; thread_count_increment: number; last_reply_at: string }) => void;
   'reaction:update': (data: ReactionUpdatePayload) => void;
@@ -94,6 +96,8 @@ export interface MessageCallback {
 export interface MessageHiddenPayload {
   message_id: string;
   parent_message_id: string | null;
+  /** Qui l'a masqué : modération (par défaut) ou son auteur (fichier supprimé avec ses messages) */
+  by?: 'author' | 'moderation';
 }
 
 export interface ReactionUpdatePayload {

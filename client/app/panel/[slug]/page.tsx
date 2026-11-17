@@ -19,6 +19,7 @@ import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { safeLocalMediaUrl, safeGifUrl } from '@/lib/safeUrl';
 import { TierSettingsPanels } from '@/components/admin/TierSettingsPanels';
+import { AdminFilesGallery } from '@/components/admin/AdminFilesGallery';
 
 // ─── Session admin ────────────────────────────────────────────────
 // 🔐 Le jeton admin (émis après TOTP) est dans un cookie httpOnly : JavaScript ne le voit pas.
@@ -44,7 +45,7 @@ function clearToken() {
 
 // ─── Types ────────────────────────────────────────────────────────
 type Screen = 'loading' | 'login' | 'denied' | 'setup' | 'verify' | 'dashboard';
-type Tab = 'stats' | 'moderation' | 'users' | 'groups' | 'settings' | 'security';
+type Tab = 'stats' | 'moderation' | 'users' | 'groups' | 'files' | 'settings' | 'security';
 
 // ─── Composant : aperçu image dans les signalements ──────────────────────────
 function AdminReportImage({ url: rawUrl, type }: { url: string; type: string }) {
@@ -152,6 +153,8 @@ export default function AdminPanelPage() {
 
   // ⭐ État modal ban (onglet utilisateurs)
   const [banTarget, setBanTarget] = useState(null as ({ id: string; name: string } | null));
+  // Galerie des fichiers d'un membre (depuis le tableau des utilisateurs)
+  const [filesUser, setFilesUser] = useState(null as ({ id: string; name: string } | null));
   const [banDuration, setBanDuration] = useState('permanent');
   const [banReason, setBanReason] = useState('');
   const [banCustomReason, setBanCustomReason] = useState('');
@@ -194,7 +197,7 @@ export default function AdminPanelPage() {
       if (method === 'get') return (await api.get(fullUrl)).data;
       if (method === 'post') return (await api.post(fullUrl, body)).data;
       if (method === 'patch') return (await api.patch(fullUrl, body)).data;
-      if (method === 'delete') return (await api.delete(fullUrl)).data;
+      if (method === 'delete') return (await api.delete(fullUrl, body ? { data: body } : undefined)).data;
     } catch (err: any) {
       // Session admin expirée ou absente côté serveur → nouveau code TOTP
       if (err?.response?.status === 403 && /ADMIN_TOKEN/.test(err.response?.data?.error || '')) {
@@ -831,6 +834,7 @@ export default function AdminPanelPage() {
     { id: 'moderation', icon: '🚩', label: 'Modération' },
     { id: 'users',    icon: '👥', label: 'Utilisateurs' },
     { id: 'groups',   icon: '💬', label: 'Salons' },
+    { id: 'files',    icon: '🗂️', label: 'Fichiers' },
     { id: 'settings', icon: '⚙️', label: 'Paramètres' },
     { id: 'security', icon: '🔐', label: 'Sécurité' },
   ];
@@ -1214,6 +1218,8 @@ export default function AdminPanelPage() {
 
                           {/* Actions */}
                           <td className="px-4 py-3 text-right space-x-2">
+                            <button onClick={() => setFilesUser({ id: u.id, name: u.username })} title={`Fichiers de ${u.username}`}
+                              aria-label={`Fichiers de ${u.username}`} className="text-[10px] text-purple-300 hover:underline">📁 Fichiers</button>
                             {u.app_role !== 'superadmin' && (
                               <>
                                 {u.is_muted
@@ -1710,6 +1716,15 @@ export default function AdminPanelPage() {
             <TierSettingsPanels getSetting={getSetting} updateSetting={updateSetting}
               settingsDirty={settingsDirty} settingsSaving={settingsSaving} saveSettings={saveSettings}
               adminApi={adminApi} showToast={showToast} reloadSettings={loadSettings} />
+          )}
+
+          {/* ══════════════════════════════════════════════════════
+              ONGLET FICHIERS — galerie de tout ce qui a été envoyé
+          ══════════════════════════════════════════════════════ */}
+          {tab === 'files' && (
+            <div className="p-6">
+              <AdminFilesGallery adminApi={adminApi} showToast={showToast} />
+            </div>
           )}
 
           {/* ══════════════════════════════════════════════════════
@@ -2242,6 +2257,22 @@ export default function AdminPanelPage() {
           </div>
         );
       })()}
+
+      {/* 📁 Fichiers d'un membre (depuis le tableau des utilisateurs) */}
+      {filesUser && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-6"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) setFilesUser(null); }}>
+          <div role="dialog" aria-label={`Fichiers de ${filesUser.name}`}
+            className="w-full max-w-6xl max-h-[90vh] overflow-y-auto rounded-2xl p-5 shadow-[0_20px_60px_rgba(0,0,0,0.5)]"
+            style={{ background: 'rgba(15,15,35,0.97)', border: '1px solid rgba(139,92,246,0.15)' }}>
+            <div className="flex items-center justify-between mb-4">
+              <h2 className="text-base font-bold text-white">📁 Fichiers de {filesUser.name}</h2>
+              <button onClick={() => setFilesUser(null)} aria-label="Fermer" className="w-8 h-8 rounded-lg text-white/50 hover:text-white hover:bg-white/10">✕</button>
+            </div>
+            <AdminFilesGallery adminApi={adminApi} showToast={showToast} userId={filesUser.id} userLabel={filesUser.name} />
+          </div>
+        </div>
+      )}
 
       {/* ⭐ Modal Ban (onglet utilisateurs) */}
       {banTarget && (

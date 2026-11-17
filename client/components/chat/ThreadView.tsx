@@ -13,6 +13,7 @@ import { getSocket } from '@/lib/socket';
 import { MessageContent } from './MessageContent';
 import type { ChatMessage } from '@/hooks/useChat';
 import { showModal } from '@/components/ui/AppModal';
+import { hiddenMessageLabel, type RemovedBy } from '@/lib/files';
 
 interface ThreadViewProps {
   parentMessageId: string;
@@ -58,11 +59,11 @@ export function ThreadView({ parentMessageId, groupId, currentUserId, currentUse
     };
 
     // ⭐ Écouter les messages masqués dans ce thread
-    const onMessageHidden = (data: { message_id: string; parent_message_id: string | null }) => {
+    const onMessageHidden = (data: { message_id: string; parent_message_id: string | null; by?: string }) => {
       if (data.parent_message_id === parentMessageId) {
         setReplies(prev => prev.map(r =>
           r.id === data.message_id
-            ? { ...r, is_hidden: true, content: 'Ce message a été supprimé par la modération.', reactions: [] }
+            ? { ...r, is_hidden: true, hidden_by: (data.by as RemovedBy) || 'moderation', content: hiddenMessageLabel(data.by), reactions: [] }
             : r
         ));
       }
@@ -165,7 +166,7 @@ export function ThreadView({ parentMessageId, groupId, currentUserId, currentUse
                   </div>
                   <div className="text-[10px] text-[var(--t3)] italic flex items-center gap-1">
                     <span className="inline-block w-1 h-1 rounded-full bg-red-400/40" />
-                    Message supprimé par la modération.
+                    {hiddenMessageLabel(reply.hidden_by, true)}
                   </div>
                 </div>
               </div>
@@ -187,7 +188,7 @@ export function ThreadView({ parentMessageId, groupId, currentUserId, currentUse
                   <MessageContent content={reply.content} type={reply.type}
                     file_url={(reply as any).file_url} gif_url={(reply as any).gif_url}
                     link_preview={(reply as any).link_preview}
-                    currentUsername={currentUsername} />
+                    media_removed={(reply as any).media_removed} currentUsername={currentUsername} />
                 </div>
               </div>
 

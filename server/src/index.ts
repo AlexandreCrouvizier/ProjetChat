@@ -16,6 +16,7 @@ import { testDatabaseConnection } from './config/database';
 import { redis } from './config/redis';
 import { setupWebSocket } from './websocket/index';
 import { startLcenPurge } from './services/lcen.service';
+import { startUploadExpiry } from './services/upload.service';
 import { corsOrigin } from './utils/cors';
 
 /** Adresses IPv4 de ce PC sur le réseau local (pour tester depuis un téléphone, etc.) */
@@ -78,6 +79,8 @@ async function start() {
     console.log('');
     // LCEN : purge des traces au-delà de la durée de conservation (au démarrage puis chaque jour)
     startLcenPurge();
+    // Fichiers expirés (durée de conservation par type de compte) : au démarrage puis toutes les heures
+    startUploadExpiry(app.get('io'));
   });
 }
 

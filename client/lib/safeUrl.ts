@@ -47,3 +47,19 @@ export function safeHttpsUrl(url: unknown): string | null {
   const safe = safeMediaUrl(url);
   return safe && safe.startsWith('https://') ? safe : null;
 }
+
+/** Miniature d'une de NOS images : /uploads/thumbs/<uuid>.webp (sinon null) */
+export function safeThumbUrl(url: string | null | undefined): string | null {
+  if (typeof url !== 'string') return null;
+  return /^\/uploads\/thumbs\/[0-9a-f-]{36}\.webp$/i.test(url) ? url : null;
+}
+
+/**
+ * Miniature (400 px) déduite de l'adresse d'une image envoyée : même identifiant, dossier thumbs.
+ * Pas de miniature pour les GIF (l'animation serait perdue) : l'original est affiché.
+ */
+export function thumbForImage(url: string | null | undefined): string | null {
+  const safe = safeLocalMediaUrl(url);
+  const m = safe ? /^\/uploads\/images\/([0-9a-f-]{36})\.(webp|jpe?g|png)$/i.exec(safe) : null;
+  return m ? `/uploads/thumbs/${m[1]}.webp` : null;
+}

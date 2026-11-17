@@ -207,6 +207,59 @@ relançait le délai de toute la liste) ; plusieurs GIF ou images à la suite é
 (texte vide) ; le délai Premium de 0,5 s était arrondi à 1 s ; la pagination de l'historique pouvait sauter un
 message à la milliseconde près.
 
+## Lot 5.1 / 5.2 — Fichiers : galerie, miniatures, quotas, galerie admin (✅ fait le 17/11/2026)
+
+Vérifié par **61 nouveaux tests automatisés** (`outils-tests/e2e-lot51.mjs`) + **20 tests navigateur**
+(`e2e-fichiers-navigateur.mjs`), en plus de toutes les suites précédentes (toujours au vert). Migration **12**.
+
+**Fonctionnalités**
+- **Miniatures** WebP 400 px (sans métadonnées, 1ʳᵉ image d'un GIF) générées à l'envoi et pour les images existantes
+  (`uploads/thumbs/`) ; le fil affiche la miniature, l'image complète n'est chargée qu'à l'agrandissement.
+- **« Mes fichiers »** (profil, et 📎 → Mes fichiers dans la zone de saisie) : galerie du membre, compteur discret
+  (éléments, place / quota, estimation des envois restants d'après la taille moyenne de ses envois), **renvoi d'un fichier
+  déjà envoyé sans nouvel envoi**, suppression.
+- **Réglages par type de compte** (Panel → Paramètres → Fichiers des membres) : quota (0 → 100 Go) et suppression d'un
+  fichier déjà posté : 🙈 galerie seulement · 🗑️ effacer le fichier (« supprimé par son auteur ») · 💥 avec les messages ·
+  🔒 interdit · ⚙️ option (le membre choisit). Un fichier jamais posté est toujours effacé.
+- **Panel → onglet Fichiers** + **📁 Fichiers** dans le tableau des utilisateurs : galerie générale ou par membre
+  (filtres type / état / recherche), panneau latéral avec la trace complète (auteur, e-mail, date, IP), dimensions,
+  **EXIF** (appareil, date de prise de vue, **position GPS**), messages qui utilisent le fichier, **retrait par la modération**.
+
+| # | Gravité | Point de sécurité | Mesure |
+|---|---|---|---|
+| 40 | 🟡 Moyenne | **Suppression d'un fichier par un autre membre** ou d'un fichier déjà effacé | Uniquement ses propres fichiers (identifiant UUID vérifié, 404 sinon) ; un fichier effacé ne peut plus être renvoyé (`isOwnUpload`) |
+| 41 | 🟡 Moyenne | **Galerie : fuite d'informations** | La galerie d'un membre ne renvoie jamais d'IP ; le détail complet (IP, e-mail, EXIF) est réservé au panel (superadmin + TOTP + passerelle) |
+| 42 | 🟢 Faible | **Recherche du panel** : `%` et `_` interprétés comme jokers SQL | Caractères échappés (recherche littérale) |
+| 43 | 🟢 Faible | **Effacement silencieux** de contenus | Messages concernés prévenus en direct (`message:media_removed`, `message:hidden` avec `by`), trace LCEN conservée (date d'effacement, IP), retrait par la modération journalisé (`admin_upload_remove`) |
+
+## Lot 5.2 bis — Corrections des fichiers + durée de conservation (✅ fait le 17/11/2026)
+
+Vérifié par **29 nouveaux tests** (`outils-tests/e2e-lot52.mjs`) + **16 tests navigateur avec de vrais clics souris**
+(`e2e-corrections-fichiers-navigateur.mjs`), toutes les suites précédentes au vert. Migration **13**.
+
+**Corrections**
+- **Fichier enregistré deux fois** : un dépôt dans la barre de saisie était aussi traité par la zone de discussion, qui
+  envoyait aussitôt l'image (avec son nom en guise de texte) ; le clic sur « Envoyer » en créait une 2ᵉ. Désormais un dépôt,
+  où qu'il soit, met le fichier **en attente** dans la barre (aperçu + légende), envoyé une seule fois. Verrou d'envoi
+  immédiat (double clic, Entrée + clic). Côté serveur : **un fichier identique déjà envoyé par le même membre est réutilisé**
+  (empreinte SHA-256 du contenu + réglages de traitement), rien n'est stocké en double.
+- **📎 → « Mes fichiers » (et « Image », « Fichier ») ne réagissaient plus** : le menu se fermait dès l'appui de la souris,
+  avant que le clic soit pris en compte. Corrigé.
+- **Galerie du panel rechargée en boucle** (≈ 1,5 requête par seconde) : corrigé.
+- **« Supprimé par son auteur » / « par la modération »** : le texte affiché dépend maintenant de qui a supprimé (fil et réponses).
+- **Image envoyée sans texte** : plus de nom de fichier en guise de message (les fichiers Premium gardent leur nom).
+
+**Nouveau : durée de conservation par type de compte** (Panel → Paramètres → Fichiers des membres, 0 = sans limite, max 10 ans).
+Les images et fichiers (pas les avatars) plus anciens sont effacés automatiquement (au démarrage puis toutes les heures,
+ou tout de suite via `POST /api/admin/uploads/expire`) ; les messages gardent leur texte et affichent « ⌛ Image expirée ».
+La galerie du membre indique la durée et un badge discret quand l'expiration approche (≤ 7 jours).
+Le motif d'effacement est enregistré (`uploads.deleted_reason` : auteur, modération, expiré, avatar remplacé) et affiché dans le panel.
+
+| # | Gravité | Point de sécurité | Mesure |
+|---|---|---|---|
+| 44 | 🟢 Faible | **Réutilisation d'un fichier identique** : partage involontaire entre comptes | L'empreinte n'est comparée qu'aux fichiers **du même membre**, encore en ligne et présents sur le disque ; deux membres qui envoient la même image ont chacun leur copie |
+| 45 | 🟢 Faible | **Effacement automatique** trop large | Limité aux images et fichiers des inscrits / Premium (jamais les avatars ni les invités), par lots de 500, réglage borné 0–3650 jours, passe manuelle réservée au panel (superadmin + TOTP) et journalisée (`admin_upload_expire`) |
+
 ## Lot 4 — Renforcement, suite (🔜)
 
 - [ ] Production : NGINX + HTTPS + HSTS, domaine séparé pour les fichiers uploadés, sauvegardes chiffrées
@@ -225,6 +278,6 @@ message à la milliseconde près.
 10. **Avant chaque commit** : `npm run typecheck` dans `client/` et `server/` doit afficher 0 erreur (vérifié automatiquement par le hook `.githooks/pre-commit`).
 11. **Retirer quelqu'un d'un salon** (expulsion, départ, suppression de droits) : appeler `removeUserFromGroupRoom()` en plus de la base, sinon il continue de recevoir les messages en direct.
 12. **Événements WebSocket** : gestionnaires enregistrés dès la connexion (avant tout `await`), et chaque événement vérifie ses données et l'appartenance (`socket.rooms`) avant d'agir.
-13. **Fichiers envoyés** : toujours via `services/upload.service.ts` (quota `assertQuota`, traçabilité `record`, effacement `markDeleted`). Un fichier n'est utilisable dans un message que par son auteur (`isOwnUpload`). Jamais d'image externe en avatar.
+13. **Fichiers envoyés** : toujours via `services/upload.service.ts` (quota `assertQuota` — réglable par type de compte, traçabilité `record`, miniature `makeThumbnail`, effacement `markDeleted` / `removeFromMessages`). Un fichier n'est utilisable dans un message que par son auteur (`isOwnUpload`). Jamais d'image externe en avatar.
 14. **Réglages du panel** : toute nouvelle clé de `app_settings` modifiable depuis le panel doit avoir sa règle dans `validateSettingUpdate()` (`services/settings.service.ts`) et être lue via `settingsService` (cache 30 s invalidé à chaque modification).
 15. **Lire des messages d'un salon** (nouvelle route, recherche, export…) : appliquer la fenêtre d'historique (`historyService.windowFor` + `apply` / `visibleIds`), sinon la limite d'historique est contournable.

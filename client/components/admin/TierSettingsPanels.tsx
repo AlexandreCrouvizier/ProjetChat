@@ -5,6 +5,7 @@
  *   - Métadonnées des images envoyées (Supprimées / Conservées / Option), par type de compte
  *   - Historique visible à l'arrivée dans un salon (Tout / N avant l'arrivée / N derniers)
  *   - Délai entre deux messages + messages maximum par minute dans un salon
+ *   - Fichiers des membres : quota de stockage + que devient un fichier déjà posté quand son auteur le supprime
  *   - Conservation des traces (LCEN) : durée + purge
  *
  * 🔐 Toutes les valeurs sont revérifiées par le serveur (choix fermés, bornes) : ce composant
@@ -49,6 +50,27 @@ const HISTORY_MAX = 100000;
 const DELAY_STEPS = [200, 300, 500, 750, 1000, 1500, 2000, 3000, 5000, 7500, 10000, 15000, 20000, 30000, 45000, 60000, 120000, 300000, 600000];
 
 const DEFAULT_DELAY: Record<Tier, string> = { guest: '10000', registered: '1000', premium: '500' };
+
+// Paliers du quota de stockage (en Mo)
+/** Durée de conservation des fichiers, en jours (0 = sans limite) */
+const EXPIRY_STEPS = [0, 1, 2, 3, 7, 14, 30, 60, 90, 180, 365, 730, 1095, 1825, 3650];
+const formatDays = (d: number) => d === 0 ? 'Sans limite' : d < 30 ? `${d} jour${d > 1 ? 's' : ''}`
+  : d < 365 ? `${Math.round(d / 30)} mois (${d} j)` : `${Math.round((d / 365) * 10) / 10} an${d >= 730 ? 's' : ''} (${d} j)`;
+
+const QUOTA_STEPS = [0, 10, 25, 50, 100, 150, 200, 300, 500, 750, 1024, 1536, 2048, 3072, 5120, 10240, 20480, 51200, 102400];
+const DEFAULT_QUOTA_MB: Record<Tier, string> = { guest: '0', registered: '200', premium: '2048' };
+function formatMb(mb: number): string {
+  if (mb === 0) return 'Aucun envoi';
+  return mb >= 1024 ? `${(mb / 1024).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} Go` : `${mb} Mo`;
+}
+
+const DELETE_CHOICES: { v: string; desc: string; hint: string }[] = [
+  { v: 'gallery_only', desc: '🙈 Galerie seulement', hint: '→ Retiré de sa galerie uniquement : l\'image reste visible dans les messages et continue de compter dans son quota' },
+  { v: 'erase', desc: '🗑️ Effacer le fichier', hint: '→ Fichier effacé (quota libéré) ; les messages affichent « supprimé par son auteur »' },
+  { v: 'erase_messages', desc: '💥 Avec les messages', hint: '→ Fichier effacé et messages qui le contenaient masqués (trace LCEN conservée)' },
+  { v: 'block', desc: '🔒 Interdit', hint: '→ Impossible de supprimer un fichier déjà posté (seuls les fichiers jamais utilisés peuvent l\'être)' },
+  { v: 'option', desc: '⚙️ Option', hint: '→ Le membre choisit au moment de supprimer : galerie seulement, effacer le fichier, ou avec les messages' },
+];
 
 function nearestIndex(steps: number[], value: number): number {
   let best = 0;
@@ -308,6 +330,69 @@ export function TierSettingsPanels({ getSetting, updateSetting, settingsDirty, s
           );
         })}
         <SaveButton show={dirty(['rate_limit_ms_', 'flood_max_per_minute_'])} saving={settingsSaving} onSave={saveSettings} />
+      </div>
+
+      {/* ═════════════ Fichiers des membres : quota + suppression ═════════════ */}
+      <div className={card} style={cardStyle}>
+        <Header icon="📁" title="Fichiers des membres"
+          subtitle="Espace de stockage, suppression par l'auteur et durée de conservation des fichiers de chaque compte"
+          help={<>
+            <p><b>Quota</b> : place totale des images et fichiers d&apos;un compte (avatar compris). Les miniatures ne comptent pas. 0 = aucun envoi.</p>
+            <p><b>Suppression d&apos;un fichier déjà posté</b> (un fichier jamais utilisé est toujours effacé) :</p>
+            <p>🙈 <b>Galerie seulement</b> : il disparaît de « Mes fichiers » mais reste visible dans les messages — il occupe toujours de la place.</p>
+            <p>🗑️ <b>Effacer le fichier</b> : le fichier est effacé du serveur (place libérée), les messages restent avec la mention « Image supprimée par son auteur ».</p>
+            <p>💥 <b>Avec les messages</b> : le fichier est effacé et les messages qui le contenaient sont masqués (ils restent consultables par la modération : obligation LCEN).</p>
+            <p>🔒 <b>Interdit</b> : un fichier utilisé dans un message ne peut pas être supprimé (utile pour garder des conversations complètes).</p>
+            <p>⚙️ <b>Option</b> : le membre choisit, au moment de supprimer, parmi les trois premières possibilités.</p>
+            <p>⌛ <b>Durée de conservation</b> : passé ce délai, les images et fichiers (pas les avatars) sont effacés automatiquement (vérification toutes les heures) ; les messages affichent « Image expirée ». Si vous raccourcissez le délai, les fichiers devenus trop anciens sont effacés à la vérification suivante. 0 = conservés sans limite.</p>
+            <p>Dans tous les cas, la trace de l&apos;envoi (auteur, date, IP) est conservée selon la durée LCEN.</p>
+          </>} />
+        {TIER_ROWS.map(({ tier, label }) => {
+          const quotaKey = `storage_quota_mb_${tier}`;
+          const modeKey = `upload_delete_mode_${tier}`;
+          const expiryKey = `upload_expiry_days_${tier}`;
+          const expiry = Number(getSetting(expiryKey) || 0);
+          const disabled = tier === 'guest';
+          const quota = Number(getSetting(quotaKey) || DEFAULT_QUOTA_MB[tier]);
+          const mode = getSetting(modeKey) || 'option';
+          return (
+            <div key={tier} className="space-y-2">
+              <p className="text-[12px] font-medium text-white">{label}</p>
+              {disabled ? (
+                <p className="text-[10px]" style={faint}>→ Les invités ne peuvent pas envoyer de fichiers</p>
+              ) : (
+                <>
+                  <div>
+                    <p className="text-[10px] mb-1" style={muted}>Quota de stockage</p>
+                    <StepSlider steps={QUOTA_STEPS} value={quota} min={0} max={102400}
+                      label={`Quota de stockage (${label})`} unit="Mo"
+                      onChange={(v) => updateSetting(quotaKey, String(v))} format={formatMb} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] mb-1" style={muted}>Suppression d&apos;un fichier déjà posté</p>
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {DELETE_CHOICES.map(({ v, desc }) => (
+                        <button key={v} onClick={() => updateSetting(modeKey, v)}
+                          className="py-2 px-1 rounded-lg text-[10px] font-medium transition-all leading-tight"
+                          style={choiceStyle(mode === v)}>
+                          {desc}
+                        </button>
+                      ))}
+                    </div>
+                    <p className="text-[10px] mt-1" style={faint}>{DELETE_CHOICES.find((c) => c.v === mode)?.hint}</p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] mb-1" style={muted}>Durée de conservation des fichiers</p>
+                    <StepSlider steps={EXPIRY_STEPS} value={expiry} min={0} max={3650}
+                      label={`Durée de conservation (${label})`} unit="jours"
+                      onChange={(v) => updateSetting(expiryKey, String(v))} format={formatDays} />
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+        <SaveButton show={dirty(['storage_quota_mb_', 'upload_delete_mode_', 'upload_expiry_days_'])} saving={settingsSaving} onSave={saveSettings} />
       </div>
 
       {/* ═════════════ Conservation des traces (LCEN) ═════════════ */}

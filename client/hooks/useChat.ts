@@ -9,6 +9,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '@/lib/api';
 import { getSocket } from '@/lib/socket';
+import { hiddenMessageLabel, type RemovedBy } from '@/lib/files';
 
 export interface ReactionData { emoji: string; count: number; reacted: boolean; users?: string[]; }
 export interface ReplyToData { id: string; author_username: string; content: string; }
@@ -22,6 +23,10 @@ export interface ChatMessage {
   type: string;
   // ⭐ Phase 4.1 — Médias
   file_url: string | null;
+  /** Média effacé après coup (par son auteur ou par la modération) */
+  media_removed?: RemovedBy | null;
+  /** Qui a masqué le message (« par son auteur » / « par la modération ») */
+  hidden_by?: RemovedBy | null;
   gif_url: string | null;
   link_preview: { title: string; description: string | null; image: string | null; url: string; site_name: string | null } | null;
   is_pinned: boolean;
@@ -91,16 +96,20 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
       setMessages(prev => prev.filter(msg => msg.id !== data.message_id));
     };
     // ⭐ Message masqué par la modération : passe en is_hidden=true sans disparaître
-    const onMessageHidden = (data: { message_id: string; parent_message_id: string | null }) => {
+    const onMessageHidden = (data: { message_id: string; parent_message_id: string | null; by?: string }) => {
       if (!data.parent_message_id) {
         // Message racine → mettre à jour dans la liste principale
         setMessages(prev => prev.map(msg =>
           msg.id === data.message_id
-            ? { ...msg, is_hidden: true, content: 'Ce message a été supprimé par la modération.' }
+            ? { ...msg, is_hidden: true, file_url: null, hidden_by: (data.by as RemovedBy) || 'moderation', content: hiddenMessageLabel(data.by) }
             : msg
         ));
       }
       // Les replies de thread sont gérées par ThreadView via le même event
+    };
+    // Image / fichier effacé après coup (par son auteur ou par la modération)
+    const onMediaRemoved = (data: { message_id: string; media_removed: RemovedBy }) => {
+      setMessages(prev => prev.map(msg => msg.id === data.message_id ? { ...msg, file_url: null, media_removed: data.media_removed } : msg));
     };
     const onReactionUpdate = (data: { message_id: string; reactions: Array<{ emoji: string; count: number; users: string[] }> }) => {
       setMessages(prev => prev.map(msg => {
@@ -117,6 +126,7 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
     socket.on('message:edited', onMessageEdited);
     socket.on('message:deleted', onMessageDeleted);
     socket.on('message:hidden', onMessageHidden);
+    socket.on('message:media_removed', onMediaRemoved);
     socket.on('reaction:update', onReactionUpdate);
     socket.on('typing:update', onTypingUpdate);
 
@@ -126,6 +136,7 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
       socket.off('message:edited', onMessageEdited);
       socket.off('message:deleted', onMessageDeleted);
       socket.off('message:hidden', onMessageHidden);
+      socket.off('message:media_removed', onMediaRemoved);
       socket.off('reaction:update', onReactionUpdate);
       socket.off('typing:update', onTypingUpdate);
     };

@@ -6,6 +6,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import api from '@/lib/api';
 import { getSocket } from '@/lib/socket';
+import { hiddenMessageLabel, type RemovedBy } from '@/lib/files';
 import type { ChatMessage } from './useChat';
 
 export function useDMChat(conversationId: string | null, currentUserId: string | null) {
@@ -61,23 +62,29 @@ export function useDMChat(conversationId: string | null, currentUserId: string |
       }));
     };
     // ⭐ Message masqué par la modération dans un DM
-    const onMessageHidden = (data: { message_id: string; parent_message_id: string | null }) => {
+    const onMessageHidden = (data: { message_id: string; parent_message_id: string | null; by?: string }) => {
       if (!data.parent_message_id) {
         setMessages(prev => prev.map(msg =>
           msg.id === data.message_id
-            ? { ...msg, is_hidden: true, content: 'Ce message a été supprimé par la modération.' }
+            ? { ...msg, is_hidden: true, file_url: null, hidden_by: (data.by as RemovedBy) || 'moderation', content: hiddenMessageLabel(data.by) }
             : msg
         ));
       }
+    };
+    // Image / fichier effacé après coup (par son auteur ou par la modération)
+    const onMediaRemoved = (data: { message_id: string; media_removed: RemovedBy }) => {
+      setMessages(prev => prev.map(msg => msg.id === data.message_id ? { ...msg, file_url: null, media_removed: data.media_removed } : msg));
     };
 
     socket.on('dm:new', onNewDM);
     socket.on('reaction:update', onReactionUpdate);
     socket.on('message:hidden', onMessageHidden);
+    socket.on('message:media_removed', onMediaRemoved);
     return () => {
       socket.off('dm:new', onNewDM);
       socket.off('reaction:update', onReactionUpdate);
       socket.off('message:hidden', onMessageHidden);
+      socket.off('message:media_removed', onMediaRemoved);
     };
   }, [conversationId, currentUserId]);
 

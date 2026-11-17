@@ -21,7 +21,7 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { rateLimit } from '../middleware/rateLimit.middleware';
 import { db } from '../config/database';
 import { getIpFromRequest } from '../utils/ip';
-import { uploadService, QuotaExceededError, IMAGE_DIR, FILE_DIR, readableSize, type MetadataMode } from '../services/upload.service';
+import { uploadService, QuotaExceededError, UploadActionError, IMAGE_DIR, FILE_DIR, THUMB_DIR, readableSize, contentHash, type MetadataMode } from '../services/upload.service';
 import { settingsService } from '../services/settings.service';
 
 // ─── Sharp (optionnel) ───────────────────────────────────────────────────────
@@ -193,6 +193,20 @@ router.post('/image', requireAuth, rateLimit({ name: 'upload', max: 30, windowSe
     // Métadonnées (EXIF : GPS, appareil, date) : réglage admin, éventuellement choix du membre
     const keepMetadata = await uploadService.shouldKeepMetadata(req.user!.userId, await metadataModeFor(tier));
 
+    // ⭐ Même fichier déjà envoyé par ce membre (même contenu, mêmes réglages) → réutilisé, rien n'est stocké en double
+    const hash = contentHash(req.file.path, `image|${cs.enabled}|${cs.quality}|${maxPx}|${keepMetadata}`);
+    if (hash) {
+      const dup = await uploadService.findDuplicate(req.user!.userId, 'image', hash);
+      if (dup) {
+        safeUnlink(req.file.path);
+        return res.json({
+          url: dup.url, thumb_url: dup.thumb_url, filename: req.file.originalname,
+          size: Number(dup.size_bytes), size_readable: readableSize(Number(dup.size_bytes)),
+          mimetype: dup.mime_type, compressed: false, reused: true,
+        });
+      }
+    }
+
     let finalFilename: string;
     let finalMime: string;
     let compressed = false;
@@ -238,21 +252,26 @@ router.post('/image', requireAuth, rateLimit({ name: 'upload', max: 30, windowSe
     const finalSize = fs.statSync(path.join(IMAGE_DIR, finalFilename)).size;
     const finalUrl = `/uploads/images/${finalFilename}`;
 
-    // 🔐 Quota de stockage + traçabilité (auteur, IP, date)
+    // 🔐 Quota de stockage + traçabilité (auteur, IP, date) ; miniature 400 px pour le fil et la galerie
+    let thumb: { thumbUrl: string | null; width: number | null; height: number | null } = { thumbUrl: null, width: null, height: null };
     try {
       await uploadService.assertQuota(req.user!.userId, tier, finalSize);
+      thumb = await uploadService.makeThumbnail(finalUrl);
       await uploadService.record({
         userId: req.user!.userId, username: req.user!.username, kind: 'image', url: finalUrl,
         originalName: req.file.originalname, mimeType: finalMime, sizeBytes: finalSize, ip: getIpFromRequest(req),
+        thumbUrl: thumb.thumbUrl, width: thumb.width, height: thumb.height, contentHash: hash,
       });
     } catch (e: any) {
       safeUnlink(path.join(IMAGE_DIR, finalFilename));
+      if (thumb.thumbUrl) safeUnlink(path.join(THUMB_DIR, path.basename(thumb.thumbUrl)));
       if (e instanceof QuotaExceededError) return quotaResponse(res, e);
       return res.status(500).json({ error: 'Erreur serveur' });
     }
 
     res.json({
       url: finalUrl,
+      thumb_url: thumb.thumbUrl,
       filename: req.file.originalname,
       size: finalSize,
       size_readable: readableSize(finalSize),
@@ -260,6 +279,34 @@ router.post('/image', requireAuth, rateLimit({ name: 'upload', max: 30, windowSe
       compressed,
     });
   });
+});
+
+// ─── Galerie « Mes fichiers » ───────────────────────────────────────────────
+// GET /api/upload/mine?kind=image|file&before=<id> → fichiers du membre + compteurs (place, quota, estimation)
+router.get('/mine', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const [list, stats] = await Promise.all([
+      uploadService.gallery(req.user!.userId, { kind: req.query.kind, before: req.query.before, limit: req.query.limit, tier: req.user!.tier }),
+      uploadService.galleryStats(req.user!.userId, req.user!.tier),
+    ]);
+    res.json({ ...list, stats });
+  } catch (error: any) {
+    console.error('❌ upload mine:', error?.message || error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
+});
+
+// DELETE /api/upload/mine/:id  { mode?: gallery_only | erase | erase_messages } — selon le réglage du type de compte
+router.delete('/mine/:id', requireAuth, rateLimit({ name: 'upload-delete', max: 120, windowSeconds: 600, by: 'user' }), async (req: Request, res: Response) => {
+  try {
+    const result = await uploadService.deleteOwn(req.user!.userId, req.user!.tier, req.params.id, req.body?.mode, req.app.get('io'));
+    const stats = await uploadService.galleryStats(req.user!.userId, req.user!.tier);
+    res.json({ success: true, ...result, stats });
+  } catch (error: any) {
+    if (error instanceof UploadActionError) return res.status(error.status).json({ error: error.message, code: error.code });
+    console.error('❌ upload delete:', error?.message || error);
+    res.status(500).json({ error: 'Erreur serveur' });
+  }
 });
 
 // ─── POST /api/upload/file ──────────────────────────────────────────────────
@@ -290,6 +337,19 @@ router.post('/file', requireAuth, rateLimit({ name: 'upload', max: 30, windowSec
       return res.status(400).json({ error: `Type de fichier non autorisé (${ext || 'sans extension'}).` });
     }
 
+    // ⭐ Même fichier déjà envoyé par ce membre → réutilisé, rien n'est stocké en double
+    const hash = contentHash(req.file.path, `file|${ext}`);
+    if (hash) {
+      const dup = await uploadService.findDuplicate(req.user!.userId, 'file', hash);
+      if (dup) {
+        safeUnlink(req.file.path);
+        return res.json({
+          url: dup.url, filename: req.file.originalname, size: Number(dup.size_bytes),
+          size_readable: readableSize(Number(dup.size_bytes)), mimetype: dup.mime_type, reused: true,
+        });
+      }
+    }
+
     const fileUrl = `/uploads/files/${req.file.filename}`;
     // 🔐 Quota de stockage + traçabilité (auteur, IP, date)
     try {
@@ -297,6 +357,7 @@ router.post('/file', requireAuth, rateLimit({ name: 'upload', max: 30, windowSec
       await uploadService.record({
         userId: req.user!.userId, username: req.user!.username, kind: 'file', url: fileUrl,
         originalName: req.file.originalname, mimeType: req.file.mimetype, sizeBytes: req.file.size, ip: getIpFromRequest(req),
+        contentHash: hash,
       });
     } catch (e: any) {
       safeUnlink(req.file.path);

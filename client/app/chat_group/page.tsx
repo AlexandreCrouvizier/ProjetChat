@@ -23,6 +23,7 @@ import { MessageInput } from '@/components/chat/MessageInput';
 import { MembersPanel } from '@/components/chat/MembersPanel';
 import { ProfileModal } from '@/components/modals/ProfileModal';
 import { EditProfileModal } from '@/components/modals/EditProfileModal';
+import { MyFilesModal } from '@/components/files/MyFilesModal';
 import { CreateGroupModal } from '@/components/modals/CreateGroupModal';
 import { ReportModal } from '@/components/modals/ReportModal';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -46,6 +47,8 @@ function ChatPageContent() {
   const [activeConvName, setActiveConvName] = useState<string>('');
   const [profileUserId, setProfileUserId] = useState<string | null>(null);
   const [showEditProfile, setShowEditProfile] = useState(false);
+  const [showMyFiles, setShowMyFiles] = useState(false);
+  const [droppedFile, setDroppedFile] = useState<File | null>(null);
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ messageId: string; content: string; author: string } | null>(null);
   const [muteInfo, setMuteInfo] = useState<{ duration: string; reason: string; expires_at?: string | null; admin_message?: string } | null>(null);
@@ -200,24 +203,16 @@ function ChatPageContent() {
     if (!chatDropRef.current?.contains(e.relatedTarget as Node)) setChatDragOver(false);
   }, []);
 
-  const handleChatDrop = useCallback(async (e: React.DragEvent) => {
+  // Dépôt dans la zone de discussion : le fichier est mis en attente dans la barre de saisie
+  // (aperçu + légende possible), puis envoyé une seule fois au clic sur « Envoyer ».
+  const handleChatDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setChatDragOver(false);
     const file = e.dataTransfer.files?.[0];
-    if (!file || !activeGroupId) return;
-    // Déléguer au handleSendMedia via un event synthétique
-    const isImage = file.type.startsWith('image/') || /\.(jpe?g|png|gif|webp)$/i.test(file.name);
-    if (!isImage && user?.tier !== 'premium') {
-      showModal('Le partage de fichiers est réservé aux membres Premium.', 'warning');
-      return;
-    }
-    try {
-      const { uploadImage, uploadFile } = await import('@/lib/api');
-      const upFn = isImage ? uploadImage : uploadFile;
-      const { url } = await upFn(file);
-      await handleSendMedia({ type: isImage ? 'image' : 'file', file_url: url, content: file.name });
-    } catch (err: any) { showModal(err.message || 'Erreur lors de l\'envoi', 'error'); }
-  }, [activeGroupId, user?.tier, handleSendMedia]);
+    if (!file || (mode === 'group' ? !activeGroupId : !activeConvId)) return;
+    setDroppedFile(file);
+  }, [mode, activeGroupId, activeConvId]);
+  const clearDroppedFile = useCallback(() => setDroppedFile(null), []);
 
   return (
     <div className="h-screen flex p-3 gap-2.5">
@@ -229,6 +224,7 @@ function ChatPageContent() {
 
       <div
         ref={chatDropRef}
+        data-testid="chat-drop-zone"
         className="flex-1 glass rounded-2xl flex flex-col overflow-hidden relative"
         onDragOver={handleChatDragOver}
         onDragLeave={handleChatDragLeave}
@@ -239,7 +235,7 @@ function ChatPageContent() {
           <div className="absolute inset-0 z-30 flex flex-col items-center justify-center pointer-events-none rounded-2xl"
             style={{ background: 'rgba(139,92,246,0.10)', border: '2px dashed rgba(139,92,246,0.6)' }}>
             <span className="text-5xl mb-3">📎</span>
-            <p className="text-lg font-semibold" style={{ color: '#a78bfa' }}>Déposer pour envoyer</p>
+            <p className="text-lg font-semibold" style={{ color: '#a78bfa' }}>Déposer pour joindre</p>
             <p className="text-sm mt-1" style={{ color: 'rgba(167,139,250,0.6)' }}>Images JPG, PNG, GIF, WEBP</p>
           </div>
         )}
@@ -267,6 +263,7 @@ function ChatPageContent() {
         )}
 
         <MessageInput onSend={handleSendMessage} onSendMedia={handleSendMedia}
+          droppedFile={droppedFile} onDroppedFileUsed={clearDroppedFile}
           onTyping={mode === 'group' ? groupChat.emitTyping : () => {}}
           channelName={mode === 'group' ? activeGroupName : activeConvName}
           disabled={mode === 'group' ? !activeGroupId : !activeConvId}
@@ -279,7 +276,9 @@ function ChatPageContent() {
       {/* ⭐ ProfileModal: onClose rafraîchit les bloqués */}
       <ProfileModal userId={profileUserId} currentUserId={user?.id || ''} currentUserTier={user?.tier || 'guest'}
         isOpen={!!profileUserId} onClose={handleProfileClose} onStartDM={handleStartDM} />
-      <EditProfileModal isOpen={showEditProfile} onClose={() => setShowEditProfile(false)} />
+      <EditProfileModal isOpen={showEditProfile} onClose={() => setShowEditProfile(false)}
+        onOpenFiles={() => { setShowEditProfile(false); setShowMyFiles(true); }} />
+      <MyFilesModal isOpen={showMyFiles} onClose={() => setShowMyFiles(false)} mode="manage" />
       <CreateGroupModal isOpen={showCreateGroup} onClose={() => setShowCreateGroup(false)} onCreated={handleGroupCreated} />
       <ReportModal isOpen={!!reportTarget} messageId={reportTarget?.messageId || null}
         messageContent={reportTarget?.content || ''} authorName={reportTarget?.author || ''}

@@ -55,8 +55,9 @@ function formatMessage(msg: any, options?: { reactions?: any[]; replyTo?: any; t
     parent_message_id: msg.parent_message_id || null,
     reply_to_id: msg.reply_to_id || null,
     type: msg.type || 'text',
-    // ⭐ Phase 4.1 — Médias
-    file_url: msg.file_url || null,
+    // ⭐ Phase 4.1 — Médias (fichier effacé après coup : plus d'URL, le client affiche « supprimé »)
+    file_url: msg.media_removed ? null : (msg.file_url || null),
+    media_removed: msg.media_removed || null,
     gif_url: msg.gif_url || null,
     link_preview: msg.link_preview || null,
     is_pinned: msg.is_pinned || false,

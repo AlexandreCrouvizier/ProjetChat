@@ -32,6 +32,7 @@ import { db } from '../config/database';
 import { validateSettingUpdate, invalidateAppSettings } from '../services/settings.service';
 import { logAudit } from '../middleware/audit.middleware';
 import { lcenService } from '../services/lcen.service';
+import { uploadService, UploadActionError } from '../services/upload.service';
 import { getIpFromRequest } from '../utils/ip';
 
 // ══════════════════════════════════
@@ -97,6 +98,61 @@ adminRouter.post('/lcen/purge', async (req, res) => {
     res.json({ success: true, result });
   } catch (error: any) {
     console.error('❌ admin lcen purge:', error?.message || error);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+// ══════════════════════════════════
+// Galerie des fichiers envoyés (tous, ou ceux d'un membre)
+// ══════════════════════════════════
+
+/** GET /api/admin/uploads?user_id=&kind=image|file|avatar&status=active|deleted|all&q=&before= */
+adminRouter.get('/uploads', async (req, res) => {
+  try {
+    res.json(await uploadService.adminList({
+      userId: req.query.user_id, kind: req.query.kind, status: req.query.status,
+      q: req.query.q, before: req.query.before, limit: req.query.limit,
+    }));
+  } catch (error: any) {
+    console.error('❌ admin uploads:', error?.message || error);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/** POST /api/admin/uploads/expire — effacer maintenant les fichiers dont la durée de conservation est dépassée */
+adminRouter.post('/uploads/expire', async (req, res) => {
+  try {
+    const expired = await uploadService.expireOld(req.app.get('io'));
+    await logAudit('admin_upload_expire', getIpFromRequest(req), req.user?.userId, { expired }, req.headers['user-agent']);
+    res.json({ success: true, expired });
+  } catch (error: any) {
+    console.error('❌ admin uploads expire:', error?.message || error);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/** GET /api/admin/uploads/:id — trace complète + dimensions + EXIF + messages qui utilisent le fichier */
+adminRouter.get('/uploads/:id', async (req, res) => {
+  try {
+    res.json(await uploadService.adminDetail(req.params.id));
+  } catch (error: any) {
+    if (error instanceof UploadActionError) return res.status(error.status).json({ error: error.message });
+    console.error('❌ admin upload detail:', error?.message || error);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/** DELETE /api/admin/uploads/:id  { with_messages?: boolean } — retrait par la modération (tracé) */
+adminRouter.delete('/uploads/:id', async (req, res) => {
+  try {
+    const result = await uploadService.adminRemove(req.params.id, req.body?.with_messages === true, req.app.get('io'));
+    await logAudit('admin_upload_remove', getIpFromRequest(req), req.user?.userId,
+      { upload_id: req.params.id, url: result.url, owner: result.user_id, messages: result.messages, with_messages: req.body?.with_messages === true },
+      req.headers['user-agent']);
+    res.json({ success: true, ...result });
+  } catch (error: any) {
+    if (error instanceof UploadActionError) return res.status(error.status).json({ error: error.message });
+    console.error('❌ admin upload remove:', error?.message || error);
     res.status(500).json({ error: 'INTERNAL_ERROR' });
   }
 });

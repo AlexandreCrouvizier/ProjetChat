@@ -19,6 +19,8 @@ export interface Message {
   reply_to: { id: string; author_username: string; content: string } | null;
   type: MessageType;
   file_url: string | null;
+  /** Média effacé après coup : « author » (par son auteur) ou « moderation » */
+  media_removed?: 'author' | 'moderation' | 'expired' | null;
   gif_url: string | null;
   link_preview: LinkPreview | null;
   is_ephemeral: boolean;

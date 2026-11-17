@@ -8,7 +8,7 @@
 
 import { useState } from 'react';
 import { LinkPreview } from './LinkPreview';
-import { safeLocalMediaUrl, safeGifUrl } from '@/lib/safeUrl';
+import { safeLocalMediaUrl, safeGifUrl, thumbForImage } from '@/lib/safeUrl';
 import { useGifAutoDisplay, useGifConfig } from '@/hooks/useGifConfig';
 
 interface LinkPreviewData {
@@ -21,6 +21,8 @@ interface MessageContentProps {
   gif_url?: string | null;
   link_preview?: LinkPreviewData | null;
   currentUsername?: string;
+  /** Média effacé après coup (par son auteur ou par la modération) */
+  media_removed?: 'author' | 'moderation' | 'expired' | null;
 }
 
 // ─── Utilitaires ─────────────────────────────────────────────────────────────
@@ -69,6 +71,9 @@ function ImageMessage({ src, alt }: { src: string; alt: string }) {
   const [revealed,  setRevealed]  = useState(false);
   const [open,      setOpen]      = useState(false);
   const [imgError,  setImgError]  = useState(false);
+  // ⭐ Miniature (400 px) dans le fil ; l'image complète n'est chargée qu'à l'agrandissement.
+  // Pas de miniature (ancienne image, GIF) → l'original.
+  const [thumb, setThumb] = useState<string | null>(() => thumbForImage(src));
 
   if (imgError) return <span className="text-[12px] text-[var(--t3)] italic">⚠️ Image non disponible</span>;
 
@@ -92,8 +97,8 @@ function ImageMessage({ src, alt }: { src: string; alt: string }) {
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
-          src={src} alt={alt}
-          onError={() => setImgError(true)}
+          src={thumb || src} alt={alt}
+          onError={() => { if (thumb) setThumb(null); else setImgError(true); }}
           className="max-h-72 w-auto rounded-xl object-cover"
           loading="lazy"
         />
@@ -233,8 +238,23 @@ function TextWithMentions({ content, currentUsername }: { content: string; curre
 // ─── Export principal ─────────────────────────────────────────────────────────
 
 export function MessageContent({
-  content, type = 'text', file_url, gif_url, link_preview, currentUsername,
+  content, type = 'text', file_url, gif_url, link_preview, currentUsername, media_removed,
 }: MessageContentProps) {
+  // Image / fichier effacé après coup : le texte reste, le média est remplacé par une mention
+  if (media_removed && (type === 'image' || type === 'file')) {
+    const what = type === 'image' ? 'Image' : 'Fichier';
+    const e = type === 'image' ? 'e' : '';
+    return (
+      <span>
+        {content && type === 'image' && <span className="block text-[13px] text-[var(--t1)] mb-0.5 leading-snug">{content}</span>}
+        <span className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-1.5 rounded-lg text-[11px] italic text-[var(--t3)] border border-dashed border-[var(--border)]">
+          {media_removed === 'moderation' ? `🛡️ ${what} retiré${e} par la modération`
+            : media_removed === 'expired' ? `⌛ ${what} expiré${e} (durée de conservation dépassée)`
+            : `🗑️ ${what} supprimé${e} par son auteur`}
+        </span>
+      </span>
+    );
+  }
   // 🔐 Médias affichés : nos fichiers uniquement, GIF hébergés par un fournisseur uniquement
   // (toute autre adresse — javascript:, data:, site tiers — est ignorée)
   const safeFile = safeLocalMediaUrl(file_url);

@@ -81,12 +81,20 @@ uniquement le jour où on en a vraiment l'usage.
 
 ---
 
-## 5. Fichiers envoyés : outils de gestion (suite du Lot 4.2b)
+## 5. Fichiers envoyés : outils de gestion — ✅ fait (Lot 5.1 / 5.2, 17/11/2026)
 
-- **Quotas réglables** dans Panel → Paramètres (aujourd'hui : inscrit 200 Mo, premium 2 Go, dans `shared/constants.ts`).
-- **Panel admin** : liste des fichiers d'un utilisateur (table `uploads` : date, IP, taille, nom d'origine), utile en cas de réquisition (LCEN) ou d'abus.
-- **« Mes fichiers »** pour les membres : voir et supprimer leurs anciens fichiers pour libérer de l'espace.
-- **Miniatures** (~400 px) générées à l'envoi pour le fil du chat (voir § 1).
+Quotas réglables par type de compte, galerie « Mes fichiers » (renvoi sans nouvel envoi, suppression selon le réglage),
+miniatures 400 px, galerie du panel (générale et par membre, EXIF, retrait par la modération). Détails : `SECURITE.md`.
+
+Complété le 17/11/2026 (lot 5.2 bis) : durée de conservation des fichiers par type de compte, fichiers identiques
+réutilisés (plus de doublons), « supprimé par son auteur / par la modération / expiré ».
+
+Idées pour plus tard :
+- Prévenir le membre (notification) quelques jours avant l'expiration de ses fichiers.
+- Rapport « Fichiers expirés » dans le tableau de bord du panel (nombre et place libérée par passe).
+
+Reste à faire :
+- `shared/constants.ts` : `TIER_LIMITS.*.storageQuotaBytes` n'est plus utilisé par le serveur (valeurs par défaut de la migration 12).
 - Ménage : `shared/constants.js`, `.d.ts` et `.map` sont d'anciens fichiers compilés (avril 2026), non utilisés
   (le serveur et le client lisent `constants.ts`) → à supprimer pour éviter toute confusion.
 
