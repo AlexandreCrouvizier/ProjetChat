@@ -48,3 +48,7 @@ coverage/
 
 # Misc
 *.tsbuildinfo
+
+# Documents de travail locaux (non publiés)
+docs/
+outils-tests/
