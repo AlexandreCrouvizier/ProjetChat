@@ -6,14 +6,15 @@
  * Maintenant la clé ne quitte jamais le serveur : le navigateur demande /api/gifs/search,
  * le serveur interroge le fournisseur et ne renvoie que la liste des GIF.
  *
- * 🔐 Chaque URL de GIF renvoyée par le fournisseur est mémorisée 24 h. Un message de type « gif »
- * n'est accepté que si son URL vient de là (ou d'un domaine connu du fournisseur) :
- * impossible de faire passer pour un GIF une image hébergée n'importe où (traçage d'IP des lecteurs).
+ * 🔐 Un GIF n'est accepté (résultats de recherche ET messages) que s'il est hébergé par un fournisseur
+ * (GIF_MEDIA_DOMAINS, partagé avec la CSP du client) : impossible de faire passer pour un GIF une image
+ * hébergée n'importe où (traçage d'IP des lecteurs), et le navigateur refuse toute autre image externe.
  */
 import crypto from 'crypto';
 import { redis } from '../config/redis';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
+import { isGifMediaUrl } from '../../../shared/constants';
 
 export type GifProvider = 'klipy' | 'giphy' | 'tenor' | 'none';
 
@@ -25,14 +26,11 @@ export interface GifResult {
 }
 
 const SEARCH_CACHE_SECONDS = 300;          // mêmes résultats pendant 5 min (économise le quota)
-const TRUSTED_URL_SECONDS = 24 * 3600;     // une URL proposée reste envoyable 24 h
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // réponse du fournisseur : 2 Mo max
 const REQUEST_TIMEOUT_MS = 5000;
 export const GIF_QUERY_MAX_LENGTH = 100;
 export const GIF_LIMIT_MAX = 50;
 
-// Domaines d'hébergement des fournisseurs (acceptés même si l'URL n'est plus en mémoire, ex. Redis redémarré)
-const PROVIDER_MEDIA_DOMAINS = ['klipy.com', 'giphy.com', 'tenor.com'];
 
 export function getGifProvider(): { provider: GifProvider; key: string } {
   if (env.GIF_KLIPY_API_KEY) return { provider: 'klipy', key: env.GIF_KLIPY_API_KEY };
@@ -78,6 +76,8 @@ function buildProviderUrl(provider: GifProvider, key: string, q: string, limit: 
   }
 }
 
+const rejectedHosts = new Set<string>();
+
 function normalize(provider: GifProvider, data: any): GifResult[] {
   const items: any[] = provider === 'giphy' ? data?.data : data?.results;
   if (!Array.isArray(items)) return [];
@@ -93,6 +93,11 @@ function normalize(provider: GifProvider, data: any): GifResult[] {
       original = cleanHttpsUrl(f.gif?.url || f.tinygif?.url);
     }
     if (!preview || !original) continue;
+    // 🔐 Images hébergées ailleurs que chez le fournisseur : écartées (et signalées, sans la clé)
+    if (!isGifMediaUrl(preview) || !isGifMediaUrl(original)) {
+      rejectedHosts.add(new URL(isGifMediaUrl(preview) ? original : preview).hostname);
+      continue;
+    }
     out.push({
       id: String(item?.id ?? '').slice(0, 100),
       title: typeof item?.title === 'string' && item.title.trim() ? item.title.trim().slice(0, 140) : 'GIF',
@@ -124,14 +129,6 @@ async function readJsonLimited(res: Response): Promise<any> {
   return JSON.parse(Buffer.concat(chunks).toString('utf-8'));
 }
 
-/** Mémorise les URLs proposées : elles seules pourront être envoyées comme GIF */
-async function rememberUrls(results: GifResult[]): Promise<void> {
-  if (!results.length) return;
-  const pipeline = redis.pipeline();
-  for (const r of results) pipeline.set(`gif:ok:${hash(r.original)}`, '1', 'EX', TRUSTED_URL_SECONDS);
-  await pipeline.exec();
-}
-
 export const gifService = {
   /**
    * Recherche (q vide = GIF du moment). Lève une erreur si le fournisseur ne répond pas correctement.
@@ -160,24 +157,16 @@ export const gifService = {
     }
 
     const results = normalize(provider, await readJsonLimited(res));
-    await rememberUrls(results);
+    if (rejectedHosts.size) {
+      logger.warn(`GIF ${provider} : images hébergées hors des domaines autorisés ignorées (${[...rejectedHosts].join(', ')}) — à ajouter à GIF_MEDIA_DOMAINS (shared/constants.ts) si c'est bien le fournisseur`);
+      rejectedHosts.clear();
+    }
     await redis.set(cacheKey, JSON.stringify(results), 'EX', SEARCH_CACHE_SECONDS);
     return results;
   },
 
-  /**
-   * 🔐 Une URL de GIF envoyée dans un message est-elle digne de confiance ?
-   * Oui si elle a été proposée par notre recherche (24 h) ou si elle est hébergée par un fournisseur connu.
-   */
+  /** 🔐 Une URL de GIF envoyée dans un message est-elle hébergée par un fournisseur ? */
   async isTrustedGifUrl(value: unknown): Promise<boolean> {
-    const url = cleanHttpsUrl(value);
-    if (!url) return false;
-    const host = new URL(url).hostname.toLowerCase();
-    if (PROVIDER_MEDIA_DOMAINS.some((d) => host === d || host.endsWith(`.${d}`))) return true;
-    try {
-      return (await redis.exists(`gif:ok:${hash(url)}`)) === 1;
-    } catch {
-      return false;
-    }
+    return isGifMediaUrl(value);
   },
 };

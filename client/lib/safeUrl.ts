@@ -17,6 +17,23 @@ export function safeMediaUrl(url: unknown): string | null {
   }
 }
 
+import { isGifMediaUrl } from '@/lib/gifMedia';
+
+/** 🔐 Nos propres fichiers uniquement (images et fichiers des messages) : /uploads/images|files/<uuid>.<ext> */
+export function safeLocalMediaUrl(url: unknown): string | null {
+  return typeof url === 'string' && /^\/uploads\/(images|files)\/[0-9a-f-]{36}\.[a-z0-9]{1,10}$/i.test(url) ? url : null;
+}
+
+/** 🔐 GIF : uniquement hébergés par un fournisseur (même liste que la CSP et que le serveur) */
+export function safeGifUrl(url: unknown): string | null {
+  return isGifMediaUrl(url) ? (url as string) : null;
+}
+
+/** 🔐 Image d'aperçu de lien : uniquement la copie faite par notre serveur (/uploads/previews/<sha256>.webp) */
+export function safePreviewImageUrl(url: unknown): string | null {
+  return typeof url === 'string' && /^\/uploads\/previews\/[0-9a-f]{64}\.webp$/.test(url) ? url : null;
+}
+
 /**
  * 🔐 Avatars : uniquement nos fichiers WebP (/uploads/avatars/<uuid>.webp).
  * Jamais d'image externe (traçage d'IP) ni de data: (ancien format base64).

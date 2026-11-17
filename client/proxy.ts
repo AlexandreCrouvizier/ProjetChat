@@ -12,6 +12,10 @@
  */
 import { NextResponse, type NextRequest } from 'next/server';
 import { ADMIN_GATEWAY_HEADER, isAdminGatewayRequest } from '@/lib/adminGateway';
+import { GIF_MEDIA_DOMAINS } from '@/lib/gifMedia';
+
+// 🔐 Seules images externes autorisées : celles des fournisseurs de GIF (liste partagée avec le serveur)
+const GIF_IMAGE_SOURCES = GIF_MEDIA_DOMAINS.flatMap((d) => [`https://${d}`, `https://*.${d}`]);
 
 const isDev = process.env.NODE_ENV !== 'production';
 
@@ -41,9 +45,11 @@ function buildCsp(nonce: string, request: NextRequest): string {
     'script-src': ["'self'", `'nonce-${nonce}'`, "'strict-dynamic'", ...(isDev ? ["'unsafe-eval'"] : [])],
     // Styles inline nécessaires (attributs style de React, Tailwind) — risque limité
     'style-src': ["'self'", "'unsafe-inline'"],
-    // Avatars (data:), aperçus de liens et GIF (https:), images locales
-    'img-src': ["'self'", 'data:', 'blob:', 'https:'],
-    'media-src': ["'self'", 'blob:', 'https:'],
+    // 🔐 Images : nos fichiers (avatars, images, aperçus de liens copiés par le serveur), data: (QR code TOTP),
+    // blob: (aperçus avant envoi) et les GIF des fournisseurs. Avant : 'https:' = n'importe quel site,
+    // donc n'importe quelle image piégée pouvait récupérer l'IP des lecteurs.
+    'img-src': ["'self'", 'data:', 'blob:', ...GIF_IMAGE_SOURCES],
+    'media-src': ["'self'", 'blob:'],
     'font-src': ["'self'", 'data:'],
     // 🔐 Seulement notre site et le serveur temps réel (la recherche GIF passe par le serveur)
     'connect-src': ["'self'", ...realtimeSources(request)],

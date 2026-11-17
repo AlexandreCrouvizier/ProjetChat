@@ -26,9 +26,11 @@ export const BAN_EVENT = 'chatapp:banned';
 let leaving = false;
 
 export async function forceBannedExit(notice: BanNotice = {}): Promise<void> {
-  if (typeof window === 'undefined' || leaving) return;
-  leaving = true;
+  if (typeof window === 'undefined') return;
 
+  // Le motif est enregistré AVANT le verrou « leaving » : si un refus générique (API 403,
+  // reconnexion refusée) arrive une fraction de seconde avant la notification temps réel
+  // détaillée, celle-ci complète quand même le message affiché sur l'accueil.
   try {
     // On ne remplace pas un motif détaillé par un message générique
     const previous = sessionStorage.getItem(STORAGE_KEY);
@@ -36,6 +38,9 @@ export async function forceBannedExit(notice: BanNotice = {}): Promise<void> {
       sessionStorage.setItem(STORAGE_KEY, JSON.stringify(notice));
     }
   } catch { /* stockage indisponible : message générique sur l'accueil */ }
+
+  if (leaving) return;
+  leaving = true;
 
   useAuthStore.getState().logout();
 
@@ -60,6 +65,10 @@ export async function forceBannedExit(notice: BanNotice = {}): Promise<void> {
 /** Lit (et efface) le motif du bannissement à afficher sur l'accueil */
 export function takeBanNotice(): BanNotice | null {
   if (typeof window === 'undefined') return null;
+  // Sortie en cours : la déconnexion peut afficher l'accueil (navigation interne) juste
+  // avant le rechargement complet. On ne consomme pas le motif maintenant, sinon la page
+  // rechargée ne le trouverait plus et afficherait le message générique.
+  if (leaving) return null;
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (raw) {

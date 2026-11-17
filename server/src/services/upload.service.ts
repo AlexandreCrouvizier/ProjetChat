@@ -21,7 +21,8 @@ export const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
 export const IMAGE_DIR = path.join(UPLOAD_ROOT, 'images');
 export const FILE_DIR = path.join(UPLOAD_ROOT, 'files');
 export const AVATAR_DIR = path.join(UPLOAD_ROOT, 'avatars');
-for (const dir of [UPLOAD_ROOT, IMAGE_DIR, FILE_DIR, AVATAR_DIR]) {
+export const PREVIEW_DIR = path.join(UPLOAD_ROOT, 'previews'); // images d'aperçu de liens (copiées par le serveur)
+for (const dir of [UPLOAD_ROOT, IMAGE_DIR, FILE_DIR, AVATAR_DIR, PREVIEW_DIR]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 

@@ -8,7 +8,7 @@
 
 import { useState } from 'react';
 import { LinkPreview } from './LinkPreview';
-import { safeMediaUrl } from '@/lib/safeUrl';
+import { safeLocalMediaUrl, safeGifUrl } from '@/lib/safeUrl';
 import { useGifAutoDisplay, useGifConfig } from '@/hooks/useGifConfig';
 
 interface LinkPreviewData {
@@ -235,9 +235,10 @@ function TextWithMentions({ content, currentUsername }: { content: string; curre
 export function MessageContent({
   content, type = 'text', file_url, gif_url, link_preview, currentUsername,
 }: MessageContentProps) {
-  // 🔐 Neutraliser toute URL dangereuse (javascript:, data:, …) avant affichage
-  const safeFile = safeMediaUrl(file_url);
-  const safeGif  = safeMediaUrl(gif_url);
+  // 🔐 Médias affichés : nos fichiers uniquement, GIF hébergés par un fournisseur uniquement
+  // (toute autre adresse — javascript:, data:, site tiers — est ignorée)
+  const safeFile = safeLocalMediaUrl(file_url);
+  const safeGif  = safeGifUrl(gif_url);
   file_url = safeFile ?? undefined;
   gif_url  = safeGif ?? undefined;
 

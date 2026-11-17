@@ -15,17 +15,34 @@
  *     donc résistant au « DNS rebinding »)
  *   - redirections suivies à la main (3 max) et revérifiées à chaque saut
  *   - lecture plafonnée à 500 Ko (le flux est coupé au-delà), délai total 5 s
+ *
+ * 🔐 Image d'aperçu (og:image) — avant, l'adresse de l'image était envoyée telle quelle aux navigateurs :
+ * le site du lien (ou un membre qui poste un lien vers SON site) récupérait l'IP de tous les lecteurs.
+ * Maintenant le SERVEUR la télécharge une fois (mêmes protections anti-SSRF, 5 Mo max), vérifie que
+ * c'est une vraie image (Sharp), la réduit (640 px, WebP, sans métadonnées) et la sert depuis
+ * /uploads/previews/. Les navigateurs ne contactent plus jamais le site d'origine.
  */
 
 import http from 'http';
 import https from 'https';
 import dns from 'dns';
 import net from 'net';
+import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import { redis } from '../config/redis';
+import { PREVIEW_DIR } from './upload.service';
+import { logger } from '../utils/logger';
+
+let sharp: any = null;
+try { sharp = require('sharp'); } catch { /* sans Sharp : aperçus sans image */ }
 
 const CACHE_TTL_SECONDS = 60 * 60 * 24; // 24 heures
 const FETCH_TIMEOUT_MS  = 5_000;         // 5 secondes max par requête
 const MAX_HTML_BYTES    = 500_000;       // Lire 500 Ko max
+const MAX_IMAGE_BYTES   = 5 * 1024 * 1024; // Image d'aperçu : 5 Mo max avant traitement
+const PREVIEW_IMAGE_PX  = 640;           // Largeur/hauteur max de l'image servie
+export const PREVIEW_URL_RE = /^\/uploads\/previews\/[0-9a-f]{64}\.webp$/;
 
 const URL_REGEX = /https?:\/\/[^\s<>"']+/gi;
 
@@ -126,8 +143,18 @@ function isAllowedTarget(u: URL): boolean {
   return true;
 }
 
-/** Télécharge le début d'une page HTML de façon sûre. null si refusé ou en échec. */
-function fetchHtmlSafely(rawUrl: string, redirectsLeft = 3, deadline = Date.now() + FETCH_TIMEOUT_MS): Promise<string | null> {
+interface SafeFetchOptions {
+  accept: string;                          // en-tête Accept
+  maxBytes: number;                        // au-delà : coupé (texte) ou refusé (image)
+  allowType: (contentType: string) => boolean;
+  truncate: boolean;                       // true = on garde le début (HTML), false = refus si trop gros (image)
+}
+
+/**
+ * Télécharge une ressource de façon sûre (anti-SSRF, redirections revérifiées, taille et durée plafonnées).
+ * null si refusé ou en échec.
+ */
+function fetchSafely(rawUrl: string, opts: SafeFetchOptions, redirectsLeft = 3, deadline = Date.now() + FETCH_TIMEOUT_MS): Promise<Buffer | null> {
   return new Promise((resolve) => {
     let u: URL;
     try { u = new URL(rawUrl); } catch { return resolve(null); }
@@ -136,7 +163,7 @@ function fetchHtmlSafely(rawUrl: string, redirectsLeft = 3, deadline = Date.now(
     if (remaining <= 0) return resolve(null);
 
     let settled = false;
-    const finish = (value: string | null) => { if (!settled) { settled = true; clearTimeout(timer); resolve(value); } };
+    const finish = (value: Buffer | null) => { if (!settled) { settled = true; clearTimeout(timer); resolve(value); } };
 
     const lib = u.protocol === 'https:' ? https : http;
     const req = lib.request(u, {
@@ -144,7 +171,7 @@ function fetchHtmlSafely(rawUrl: string, redirectsLeft = 3, deadline = Date.now(
       lookup: safeLookup as any,
       headers: {
         'User-Agent': 'ChatApp/1.0 LinkPreviewBot (compatible; like Twitterbot)',
-        'Accept': 'text/html,application/xhtml+xml',
+        'Accept': opts.accept,
         'Accept-Language': 'fr,en;q=0.9',
         'Accept-Encoding': 'identity',
       },
@@ -156,22 +183,27 @@ function fetchHtmlSafely(rawUrl: string, redirectsLeft = 3, deadline = Date.now(
         let next: string;
         try { next = new URL(res.headers.location, u).toString(); } catch { return finish(null); }
         settled = true; clearTimeout(timer);
-        return resolve(fetchHtmlSafely(next, redirectsLeft - 1, deadline));
+        return resolve(fetchSafely(next, opts, redirectsLeft - 1, deadline));
       }
-      if (status < 200 || status >= 300 || !String(res.headers['content-type'] || '').includes('text/html')) {
+      if (status < 200 || status >= 300 || !opts.allowType(String(res.headers['content-type'] || ''))) {
         res.resume();
+        return finish(null);
+      }
+      if (!opts.truncate && Number(res.headers['content-length'] || 0) > opts.maxBytes) {
+        res.destroy();
         return finish(null);
       }
       const chunks: Buffer[] = [];
       let total = 0;
       res.on('data', (chunk: Buffer) => {
         if (settled) return;
-        const room = MAX_HTML_BYTES - total;
+        if (!opts.truncate && total + chunk.length > opts.maxBytes) { res.destroy(); return finish(null); }
+        const room = opts.maxBytes - total;
         chunks.push(chunk.length > room ? chunk.subarray(0, room) : chunk);
         total += Math.min(chunk.length, room);
-        if (total >= MAX_HTML_BYTES) { res.destroy(); finish(Buffer.concat(chunks).toString('utf8')); }
+        if (total >= opts.maxBytes) { res.destroy(); finish(Buffer.concat(chunks)); }
       });
-      res.on('end', () => finish(Buffer.concat(chunks).toString('utf8')));
+      res.on('end', () => finish(Buffer.concat(chunks)));
       res.on('error', () => finish(null));
     });
 
@@ -179,6 +211,48 @@ function fetchHtmlSafely(rawUrl: string, redirectsLeft = 3, deadline = Date.now(
     req.on('error', () => finish(null));
     req.end();
   });
+}
+
+/** Début d'une page HTML (500 Ko max) */
+async function fetchHtmlSafely(rawUrl: string): Promise<string | null> {
+  const buf = await fetchSafely(rawUrl, {
+    accept: 'text/html,application/xhtml+xml', maxBytes: MAX_HTML_BYTES, truncate: true,
+    allowType: (ct) => ct.includes('text/html'),
+  });
+  return buf ? buf.toString('utf8') : null;
+}
+
+/**
+ * 🔐 Copie locale de l'image d'aperçu : téléchargée par le serveur, vérifiée, réduite, sans métadonnées.
+ * Nom = empreinte SHA-256 de l'adresse d'origine (une même image n'est téléchargée qu'une fois).
+ * Retourne /uploads/previews/<sha256>.webp, ou null (pas d'image dans l'aperçu).
+ */
+async function storePreviewImage(imageUrl: string): Promise<string | null> {
+  if (!sharp) return null;
+  const name = `${crypto.createHash('sha256').update(imageUrl).digest('hex')}.webp`;
+  const out = path.join(PREVIEW_DIR, name);
+  const publicUrl = `/uploads/previews/${name}`;
+  if (fs.existsSync(out)) return publicUrl;
+
+  const buf = await fetchSafely(imageUrl, {
+    accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif', maxBytes: MAX_IMAGE_BYTES, truncate: false,
+    // SVG exclu : format texte pouvant contenir du code
+    allowType: (ct) => /^image\/(jpeg|png|webp|gif|avif)/i.test(ct),
+  }, 3, Date.now() + 3_000); // 3 s max : l'aperçu ne doit pas retarder l'envoi du message
+  if (!buf) return null;
+  try {
+    const meta = await sharp(buf, { limitInputPixels: 50_000_000 }).metadata();
+    if (!['jpeg', 'png', 'webp', 'gif', 'heif'].includes(meta.format)) return null;
+    await sharp(buf, { limitInputPixels: 50_000_000 })
+      .rotate()
+      .resize(PREVIEW_IMAGE_PX, PREVIEW_IMAGE_PX, { fit: 'inside', withoutEnlargement: true })
+      .webp({ quality: 78 })
+      .toFile(out);
+    return publicUrl;
+  } catch (error: any) {
+    logger.warn(`Image d'aperçu ignorée : ${error?.message || error}`);
+    return null;
+  }
 }
 
 export const linkPreviewService = {
@@ -195,7 +269,8 @@ export const linkPreviewService = {
    * Vérifie le cache Redis avant tout fetch réseau.
    */
   async fetchPreview(url: string): Promise<LinkPreviewData | null> {
-    const cacheKey = `lp:${url}`;
+    // lp2 : nouveau format (image locale) — les anciens aperçus en cache (image externe) sont ignorés
+    const cacheKey = `lp2:${url}`;
 
     // 1. Cache Redis
     try {
@@ -213,11 +288,20 @@ export const linkPreviewService = {
       const preview: LinkPreviewData = {
         title:       extractOgMeta(html, 'title')       || hostname,
         description: extractOgMeta(html, 'description') || '',
-        // 🔐 Image d'aperçu : uniquement une URL https absolue
-        image:       (() => { const img = extractOgMeta(html, 'image'); return img && /^https:\/\//i.test(img) ? img.slice(0, 1000) : null; })(),
+        image:       null,
         site_name:   extractOgMeta(html, 'site_name'),
         url,
       };
+
+      // 🔐 Image d'aperçu copiée chez nous (https uniquement, relative résolue par rapport à la page)
+      const ogImage = extractOgMeta(html, 'image');
+      if (ogImage) {
+        let absolute: string | null = null;
+        try { absolute = new URL(ogImage, url).toString(); } catch { absolute = null; }
+        if (absolute && absolute.startsWith('https://') && absolute.length <= 1000) {
+          preview.image = await storePreviewImage(absolute);
+        }
+      }
 
       // Troncature
       if (preview.title.length > 120)       preview.title       = preview.title.substring(0, 120) + '…';

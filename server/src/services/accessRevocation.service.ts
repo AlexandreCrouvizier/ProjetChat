@@ -2,11 +2,12 @@
  * services/accessRevocation.service.ts — Couper l'accès d'un utilisateur banni
  *
  * 🔐 Un bannissement doit prendre effet IMMÉDIATEMENT, partout :
- *   1. Marqueur Redis « accès révoqué » → toute requête API avec son jeton d'accès
+ *   1. Notification « moderation:banned » (motif, durée), envoyée en premier pour que
+ *      le motif arrive avant tout refus de l'API.
+ *   2. Marqueur Redis « accès révoqué » → toute requête API avec son jeton d'accès
  *      est refusée (403 ACCOUNT_SUSPENDED), sans attendre l'expiration du jeton (15 min).
- *   2. Toutes ses sessions (refresh tokens) sont supprimées → plus de renouvellement.
- *   3. Notification « moderation:banned » (motif, durée) puis fermeture de ses WebSocket
- *      (après 1 s, pour laisser passer la notification).
+ *   3. Toutes ses sessions (refresh tokens) sont supprimées → plus de renouvellement.
+ *   4. Fermeture de ses WebSocket (après 1 s, pour laisser passer la notification).
  *
  * Le marqueur vit un peu plus longtemps qu'un jeton d'accès : au-delà, le jeton a expiré
  * et ne peut plus être renouvelé (sessions supprimées + vérification du ban à la connexion).
@@ -40,24 +41,27 @@ export async function revokeUserAccess(
   userId: string,
   notice?: BanNotice,
 ): Promise<void> {
-  // 1. Refus immédiat de son jeton d'accès encore valide
+  // 1. Prévenir d'abord (motif, durée) : si le refus de l'API arrivait avant cette
+  //    notification, le navigateur quitterait le chat et ne recevrait jamais le motif.
+  //    L'envoi est immédiat (aucune attente) : la révocation suit dans la foulée.
+  if (io && notice) {
+    io.to(`user:${userId}`).emit('moderation:banned', {
+      duration: notice.duration || 'permanent',
+      reason: notice.reason,
+      expires_at: notice.expires_at ?? null,
+      admin_message: notice.admin_message || undefined,
+    });
+  }
+  // 2. Refus immédiat de son jeton d'accès encore valide
   try {
     await redis.set(REVOKED_KEY(userId), '1', 'EX', accessTokenLifetimeSeconds());
   } catch (err) {
     console.error('❌ Révocation (Redis) impossible :', (err as Error)?.message);
   }
-  // 2. Plus aucun renouvellement de session
+  // 3. Plus aucun renouvellement de session
   await sessionRepository.deleteAllForUser(userId);
-  // 3. Prévenir puis fermer ses connexions temps réel
+  // 4. Fermer ses connexions temps réel (après 1 s, pour laisser passer la notification)
   if (io) {
-    if (notice) {
-      io.to(`user:${userId}`).emit('moderation:banned', {
-        duration: notice.duration || 'permanent',
-        reason: notice.reason,
-        expires_at: notice.expires_at ?? null,
-        admin_message: notice.admin_message || undefined,
-      });
-    }
     setTimeout(() => { io.in(`user:${userId}`).disconnectSockets(true); }, 1000);
   }
 }

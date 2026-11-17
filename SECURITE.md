@@ -158,9 +158,24 @@ anciennes (`e2e-migration-4.2b.mjs`) et **8 tests navigateur** (`e2e-avatar-navi
 **Bugs trouvés en route** : photos de téléphone prises en portrait enregistrées couchées (orientation EXIF perdue à la
 compression → `rotate()`) ; « Modifier le profil » effaçait les changements en cours si le profil en mémoire était rafraîchi.
 
+## Lot 4.2c — Images externes (✅ fait le 17/11/2026)
+
+Vérifié par **17 nouveaux tests automatisés** (`outils-tests/e2e-lot42c.mjs`) + **5 tests navigateur**
+(`e2e-apercu-navigateur.mjs`), en plus des 26 + 14 + 35 + 5 + 38 + 8 existants (toujours au vert).
+
+| # | Gravité | Faille | Correction |
+|---|---|---|---|
+| 32 | 🟠 Élevée | **Images des aperçus de liens chargées chez le site tiers** : il suffisait de poster un lien vers son propre site pour récupérer l'IP (et l'heure de lecture) de tous ceux qui voyaient le message | Le serveur **télécharge l'image une seule fois** (protection anti-SSRF, redirections revérifiées, 5 Mo max, 3 s, SVG refusé, contenu vérifié par Sharp) et la **réenregistre** en WebP 640 px sans métadonnées dans `uploads/previews/<sha256>.webp`. Client : seule cette adresse est affichée (`safePreviewImageUrl`). Les anciens aperçus s'affichent sans image |
+| 33 | 🟠 Élevée | **CSP `img-src https:`** : n'importe quelle image de n'importe quel site pouvait être chargée (filet de sécurité absent si un contrôle côté client était oublié) | `img-src` limitée à notre site + domaines des fournisseurs de GIF (`klipy.com`, `giphy.com`, `tenor.com`) ; `media-src` limitée à notre site |
+| 34 | 🟡 Moyenne | **GIF acceptés sur la seule foi de la recherche** (mémoire de 24 h dans Redis) : un fournisseur compromis ou un résultat inattendu pouvait faire afficher un hôte quelconque | Liste blanche unique `GIF_MEDIA_DOMAINS` (`shared/constants.ts`, copiée dans `client/lib/gifMedia.ts` — un test vérifie que les deux sont identiques) : https, port 443, sans identifiants, domaine exact ou sous-domaine. Les résultats hors liste sont écartés de la recherche (et signalés dans le journal serveur) |
+
+**Bug trouvé en route** : un membre banni voyait parfois le message générique « Compte suspendu » **sans le motif**.
+La déconnexion affichait l'accueil (navigation interne), qui consommait le motif juste avant le rechargement complet.
+→ le motif n'est plus lu pendant la sortie (`lib/banGuard.ts`), et le serveur envoie la notification **avant**
+de couper l'accès (`accessRevocation.service.ts`).
+
 ## Lot 4 — Renforcement, suite (🔜)
 
-- [ ] **Images des aperçus de liens** chargées directement depuis les sites tiers (`img-src https:`) → même risque de traçage d'IP que les faux GIF : les servir via notre serveur, puis restreindre `img-src`
 - [ ] Invités : jeton de renouvellement (aujourd'hui, reconnexion obligatoire après 15 min d'inactivité du WebSocket)
 - [ ] LCEN : purge automatique des traces (messages, `uploads`, `audit_logs`) au-delà de 1 an (`node-cron`)
 - [ ] Production : NGINX + HTTPS + HSTS, domaine séparé pour les fichiers uploadés, sauvegardes chiffrées
@@ -171,7 +186,7 @@ compression → `rotate()`) ; « Modifier le profil » effaçait les changements
 2. **Chaque route qui lit une ressource vérifie le droit d'accès** (salon privé → membre ; DM → participant). Utiliser `services/access.service.ts`.
 3. **Actions de modération globales = superadmin + TOTP** (`requireSuperAdmin, requireAdminToken`).
 4. **Jamais de `fetch` serveur vers une URL fournie par un utilisateur** sans passer par la protection anti-SSRF de `linkPreview.service.ts`.
-5. **URLs affichées dans l'interface** : toujours via `safeMediaUrl()` / `safeHttpsUrl()` (`client/lib/safeUrl.ts`).
+5. **URLs affichées dans l'interface** : toujours via les fonctions de `client/lib/safeUrl.ts` (`safeLocalMediaUrl`, `safeGifUrl`, `safePreviewImageUrl`, `safeAvatarUrl`…). **Aucune image d'un site tiers** : soit le serveur la copie chez nous, soit son domaine figure dans `GIF_MEDIA_DOMAINS` (et donc dans `img-src`).
 6. **IP du client** : toujours `getIpFromRequest()` / `getIpFromSocket()`, jamais `req.ip` ni l'en-tête brut.
 7. **Jetons de session** : uniquement via `utils/authCookies.ts` (cookies httpOnly). Jamais de jeton dans une réponse JSON, une URL ou `localStorage`.
 8. **Pas de script inline** dans le client : la CSP le bloquerait. Si c'est indispensable, lui passer le `nonce` (voir `ThemeInitScript`).

@@ -17,7 +17,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
-import { safeMediaUrl } from '@/lib/safeUrl';
+import { safeLocalMediaUrl, safeGifUrl } from '@/lib/safeUrl';
 
 // ─── Session admin ────────────────────────────────────────────────
 // 🔐 Le jeton admin (émis après TOTP) est dans un cookie httpOnly : JavaScript ne le voit pas.
@@ -49,7 +49,7 @@ type Tab = 'stats' | 'moderation' | 'users' | 'groups' | 'settings' | 'security'
 function AdminReportImage({ url: rawUrl, type }: { url: string; type: string }) {
   const [open, setOpen] = useState(false);
   // 🔐 Un contenu signalé peut être malveillant : URL filtrée avant affichage dans le panel
-  const url = safeMediaUrl(rawUrl);
+  const url = type === 'gif' ? safeGifUrl(rawUrl) : safeLocalMediaUrl(rawUrl);
   if (!url) return null;
   return (
     <div className="mb-3">

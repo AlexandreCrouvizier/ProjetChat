@@ -8,7 +8,7 @@
 'use client';
 
 import { useState } from 'react';
-import { safeMediaUrl, safeHttpsUrl } from '@/lib/safeUrl';
+import { safeMediaUrl, safePreviewImageUrl } from '@/lib/safeUrl';
 
 interface LinkPreviewData {
   title:       string;
@@ -29,9 +29,10 @@ function getDomain(url: string): string {
 
 export function LinkPreview({ preview }: LinkPreviewProps) {
   const [imgError, setImgError] = useState(false);
-  // 🔐 Lien et image d'aperçu filtrés (pas de javascript: / data:)
+  // 🔐 Lien filtré (pas de javascript: / data:) ; image : uniquement la copie faite par notre serveur
+  // (les anciens aperçus pointant vers le site d'origine s'affichent sans image)
   const href  = safeMediaUrl(preview.url);
-  const image = safeHttpsUrl(preview.image);
+  const image = safePreviewImageUrl(preview.image);
   if (!href) return null;
   const domain = getDomain(href);
 
