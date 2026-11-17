@@ -11,6 +11,7 @@ import type { ChatMessage } from '@/hooks/useChat';
 import { ReactionBar } from './ReactionBar';
 import { MessageContent } from './MessageContent';
 import { ThreadView } from './ThreadView';
+import { safeAvatarUrl } from '@/lib/safeUrl';
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -48,8 +49,9 @@ function Avatar({ username, avatarUrl, size = 'md', onClick }: { username: strin
   const initial = username.charAt(0).toUpperCase();
   const color = getAvatarColor(username);
   const sizeClasses = size === 'md' ? 'w-10 h-10 rounded-xl text-base' : 'w-6 h-6 rounded-lg text-[9px]';
-  if (avatarUrl) {
-    return <img src={avatarUrl} alt={username} onClick={onClick} className={`${sizeClasses} object-cover shadow-[0_4px_14px_rgba(0,0,0,0.25)] flex-shrink-0 cursor-pointer hover:scale-105 transition-transform`} />;
+  const safeUrl = safeAvatarUrl(avatarUrl);
+  if (safeUrl) {
+    return <img src={safeUrl} alt={username} loading="lazy" onClick={onClick} className={`${sizeClasses} object-cover shadow-[0_4px_14px_rgba(0,0,0,0.25)] flex-shrink-0 cursor-pointer hover:scale-105 transition-transform`} />;
   }
   return (
     <div onClick={onClick} className={`${sizeClasses} bg-gradient-to-br ${color} flex items-center justify-center font-bold text-white shadow-[0_4px_14px_rgba(0,0,0,0.25)] flex-shrink-0 cursor-pointer hover:scale-105 transition-transform`}>

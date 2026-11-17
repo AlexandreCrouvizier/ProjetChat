@@ -7,6 +7,7 @@ import { useState } from 'react';
 import type { Group } from '@/hooks/useGroups';
 import type { Conversation } from '@/hooks/useConversations';
 import { DMList } from './DMList';
+import { safeAvatarUrl } from '@/lib/safeUrl';
 import { useTheme } from '@/hooks/useTheme';
 
 interface SidebarProps {
@@ -87,7 +88,7 @@ export function Sidebar({ user, groups, conversations, activeGroupId, activeConv
       {/* Profil */}
       <div className="px-3 py-3 border-t border-[var(--border)] flex items-center gap-2.5">
         <div onClick={onEditProfile} className={`w-9 h-9 rounded-[10px] bg-gradient-to-br ${avatarGradient} flex items-center justify-center text-[15px] font-bold text-white shadow-[0_4px_12px_rgba(0,0,0,0.25)] relative cursor-pointer hover:scale-105 transition-transform`}>
-          {user?.avatar_url ? <img src={user.avatar_url} alt="" className="w-full h-full rounded-[10px] object-cover" /> : initial}
+          {safeAvatarUrl(user?.avatar_url) ? <img src={safeAvatarUrl(user?.avatar_url)!} alt="" className="w-full h-full rounded-[10px] object-cover" /> : initial}
           <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[var(--on)] border-[2.5px] border-[var(--bg)] shadow-[0_0_8px_var(--on-g)]" />
         </div>
         <div className="flex-1 min-w-0 cursor-pointer" onClick={onEditProfile}>

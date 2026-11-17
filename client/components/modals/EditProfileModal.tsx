@@ -4,7 +4,11 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import api from '@/lib/api';
+import api, { uploadAvatar } from '@/lib/api';
+import { safeAvatarUrl } from '@/lib/safeUrl';
+
+const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+const AVATAR_MAX_BYTES = 5 * 1024 * 1024; // 5 Mo (le serveur le réduit en 256×256)
 import { useAuthStore } from '@/stores/authStore';
 import { useGifConfig, invalidateGifConfigCache } from '@/hooks/useGifConfig';
 
@@ -32,6 +36,12 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
   const [statusEmoji, setStatusEmoji] = useState('');
   const [avatarPreview, setAvatarPreview] = useState(null as string | null);
   const [avatarChanged, setAvatarChanged] = useState(false);
+  const [avatarFile, setAvatarFile] = useState(null as File | null);
+  const [storage, setStorage] = useState(null as {
+    used_readable: string; quota_readable: string;
+    metadata_mode?: 'strip' | 'keep' | 'option'; keep_upload_metadata?: boolean | null;
+  } | null);
+  const [keepMetadata, setKeepMetadata] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [saving, setSaving] = useState(false);
   const [gifDisplay, setGifDisplay] = useState(null as 'auto' | 'click' | null);
@@ -48,13 +58,21 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
       setBio(user.bio || '');
       setStatusText(user.status_text || '');
       setStatusEmoji(user.status_emoji || '');
-      setAvatarPreview(user.avatar_url || null);
+      setAvatarPreview(safeAvatarUrl(user.avatar_url));
       setAvatarChanged(false);
+      setAvatarFile(null);
+      setKeepMetadata(false);
+      api.get('/upload/quota')
+        .then(({ data }) => { setStorage(data); setKeepMetadata(data?.keep_upload_metadata === true); })
+        .catch(() => setStorage(null));
       setShowEmojiPicker(false);
       setGifDisplay((user.gif_display as 'auto' | 'click' | null) ?? null);
       setError(''); setSuccess('');
     }
-  }, [isOpen, user]);
+    // 🐛 Initialisé à l'ouverture seulement (et si l'utilisateur change) : avant, la moindre mise à jour
+    // du profil en mémoire (ex. réponse tardive de /auth/me) effaçait ce qu'on était en train de modifier.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, user?.id]);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -71,15 +89,20 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
   const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith('image/')) { setError('Seules les images sont acceptées'); return; }
-    if (file.size > 500 * 1024) { setError('Image trop volumineuse (max 500KB)'); return; }
+    e.target.value = ''; // permet de re-choisir le même fichier
+    if (!AVATAR_TYPES.includes(file.type)) { setError('Formats acceptés : JPG, PNG, WEBP, GIF'); return; }
+    if (file.size > AVATAR_MAX_BYTES) { setError('Image trop volumineuse (5 Mo maximum)'); return; }
     setError('');
-    const reader = new FileReader();
-    reader.onload = (event) => { setAvatarPreview(event.target?.result as string); setAvatarChanged(true); };
-    reader.readAsDataURL(file);
+    if (avatarPreview?.startsWith('blob:')) URL.revokeObjectURL(avatarPreview);
+    setAvatarFile(file);
+    setAvatarPreview(URL.createObjectURL(file)); // aperçu local, rien n'est envoyé avant « Enregistrer »
+    setAvatarChanged(true);
   };
 
-  const handleDeleteAvatar = () => { setAvatarPreview(null); setAvatarChanged(true); };
+  const handleDeleteAvatar = () => {
+    if (avatarPreview?.startsWith('blob:')) URL.revokeObjectURL(avatarPreview);
+    setAvatarFile(null); setAvatarPreview(null); setAvatarChanged(true);
+  };
 
   const handleSave = async () => {
     setSaving(true); setError(''); setSuccess('');
@@ -89,25 +112,29 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
         username: username.trim(),
         bio: bio.trim(),
         gif_display: gifDisplay,
+        // Choix des métadonnées : envoyé seulement si l'admin laisse le choix aux membres
+        ...(storage?.metadata_mode === 'option' ? { keep_upload_metadata: keepMetadata } : {}),
       });
 
-      // 2. Avatar si modifié
+      // 2. Avatar si modifié (fichier envoyé au serveur, qui renvoie l'adresse définitive)
+      let newAvatarUrl: string | null = profileData.user.avatar_url ?? null;
       if (avatarChanged) {
-        if (avatarPreview) {
-          await api.patch('/users/me/avatar', { avatar_url: avatarPreview });
+        if (avatarFile) {
+          newAvatarUrl = (await uploadAvatar(avatarFile)).avatar_url;
         } else {
           await api.delete('/users/me/avatar');
+          newAvatarUrl = null;
         }
       }
 
       // 3. Statut
       await api.patch('/users/me/status', { status_text: statusText.trim(), status_emoji: statusEmoji.trim() });
 
-      setUser({ ...profileData.user, avatar_url: avatarChanged ? avatarPreview : profileData.user.avatar_url, status_text: statusText.trim(), status_emoji: statusEmoji.trim(), gif_display: gifDisplay });
+      setUser({ ...profileData.user, avatar_url: newAvatarUrl, status_text: statusText.trim(), status_emoji: statusEmoji.trim(), gif_display: gifDisplay });
       setSuccess('Profil mis à jour !');
       setTimeout(() => onClose(), 800);
     } catch (err: any) {
-      setError(err.response?.data?.message || 'Erreur lors de la sauvegarde');
+      setError(err.response?.data?.message || err.message || 'Erreur lors de la sauvegarde');
     }
     setSaving(false);
   };
@@ -142,9 +169,12 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
               <div>
                 <button onClick={() => fileInputRef.current?.click()} className="text-xs text-[var(--acc)] hover:underline">Changer</button>
                 {avatarPreview && <button onClick={handleDeleteAvatar} className="text-xs text-red-400 hover:underline ml-3">Supprimer</button>}
-                <p className="text-[10px] text-[var(--t3)] mt-0.5">JPG, PNG, GIF — Max 500KB</p>
+                <p className="text-[10px] text-[var(--t3)] mt-0.5">JPG, PNG, WEBP, GIF — 5 Mo max (recadré en 256×256)</p>
+                {storage && (
+                  <p className="text-[10px] text-[var(--t3)] mt-0.5">Espace utilisé : {storage.used_readable} sur {storage.quota_readable}</p>
+                )}
               </div>
-              <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarChange} className="hidden" />
+              <input ref={fileInputRef} type="file" accept="image/jpeg,image/png,image/webp,image/gif" onChange={handleAvatarChange} className="hidden" />
             </div>
           </div>
 
@@ -256,6 +286,38 @@ export function EditProfileModal({ isOpen, onClose }: EditProfileModalProps) {
               </div>
             );
           })()}
+
+          {/* 🛰️ Métadonnées des photos — visible seulement si l'admin laisse le choix */}
+          {storage?.metadata_mode === 'option' && (
+            <div className="mb-5 pt-4 border-t border-[var(--border)]">
+              <label className="block text-[9px] font-semibold text-[var(--t3)] uppercase tracking-wider mb-2">
+                🛰️ Métadonnées de mes photos
+              </label>
+              <div className="flex items-center justify-between p-3 rounded-xl"
+                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)' }}>
+                <div>
+                  <p className="text-[13px] font-medium text-[var(--t1)]">
+                    {keepMetadata ? 'Conservées' : 'Supprimées (recommandé)'}
+                  </p>
+                  <p className="text-[11px] text-[var(--t3)] mt-0.5">
+                    {keepMetadata
+                      ? '⚠️ Position GPS, appareil et date de vos photos seront visibles par tous ceux qui les téléchargent'
+                      : 'Position GPS, appareil et date sont retirés de vos photos avant publication'}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setKeepMetadata(k => !k)}
+                  aria-label="Conserver les métadonnées de mes photos"
+                  className={`relative w-12 h-6 rounded-full transition-all flex-shrink-0 ml-3 ${
+                    keepMetadata ? 'bg-amber-500' : 'bg-white/10'
+                  }`}>
+                  <span className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-all ${
+                    keepMetadata ? 'left-6' : 'left-0.5'
+                  }`} />
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* Boutons */}
           <div className="flex gap-2">

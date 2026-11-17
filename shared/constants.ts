@@ -13,6 +13,7 @@ export const TIER_LIMITS = {
     canUseGifs: false,
     allowedReactions: ['👍', '👎'],
     hasHistory: false,
+    storageQuotaBytes: 0,                  // aucun envoi de fichier
   },
   registered: {
     maxPublicGroups: 5,
@@ -25,6 +26,7 @@ export const TIER_LIMITS = {
     maxImageSize: 5 * 1024 * 1024,  // 5 Mo
     allowedReactions: 'all',
     hasHistory: true,
+    storageQuotaBytes: 200 * 1024 * 1024,  // 200 Mo d'images (+ avatar) au total
   },
   premium: {
     maxPublicGroups: Infinity,
@@ -36,6 +38,7 @@ export const TIER_LIMITS = {
     canUseGifs: true,
     maxImageSize: 25 * 1024 * 1024,   // 25 Mo
     maxFileSize: 100 * 1024 * 1024,    // 100 Mo
+    storageQuotaBytes: 2 * 1024 * 1024 * 1024, // 2 Go d'images et fichiers au total
     allowedReactions: 'all',
     hasHistory: true,
     canCustomizeColors: true,

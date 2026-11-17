@@ -141,12 +141,28 @@ en plus des 26 + 14 existants (toujours au vert).
 **Bug trouvé en route** : les événements WebSocket envoyés dès la connexion (ex. `group:join` à l'ouverture d'un salon)
 pouvaient être **perdus** (gestionnaires enregistrés après plusieurs accès base/Redis) → enregistrés immédiatement (`websocket/index.ts`).
 
-## Lot 4 — Renforcement, partie 2b et suite (🔜)
+## Lot 4.2b — Avatars, fichiers envoyés, quota (✅ fait le 17/11/2026)
 
-- [ ] **Avatars** : stocker en fichier (pas en base64 de 700 Ko dans la table `users`), refuser les URLs externes
-- [ ] **Fichiers uploadés** : les rattacher à l'utilisateur en base (traçabilité LCEN), quota de stockage
-- [ ] Invités : jeton de renouvellement (aujourd'hui, reconnexion obligatoire après 15 min d'inactivité du WebSocket)
+Vérifié par **38 nouveaux tests automatisés** (`outils-tests/e2e-lot42b.mjs`), **8 tests de migration** sur des données
+anciennes (`e2e-migration-4.2b.mjs`) et **8 tests navigateur** (`e2e-avatar-navigateur.mjs`), en plus des 26 + 14 + 35 + 5 existants.
+
+| # | Gravité | Faille | Correction |
+|---|---|---|---|
+| 26 | 🟠 Élevée | **Avatar = URL externe libre** : n'importe quel site pouvait récupérer l'IP de tous ceux qui voyaient l'avatar | Avatar = **fichier** uniquement : `POST /api/users/me/avatar` (5 Mo max, contenu vérifié par Sharp, converti en WebP 256×256). L'ancien `PATCH` (base64 / URL) est supprimé. Client : affichage via `safeAvatarUrl()` (seul `/uploads/avatars/<uuid>.webp` est accepté) |
+| 27 | 🟡 Moyenne | **Avatars base64 en base** (jusqu'à 700 Ko renvoyés avec CHAQUE message et chaque liste de membres) ; SVG accepté | Migration 10 : base64 → fichiers WebP, URLs externes / SVG / images illisibles retirés. Photo Google **copiée chez nous** à la connexion (hôte `googleusercontent.com` uniquement, 5 Mo, 5 s) |
+| 28 | 🟠 Élevée | **Métadonnées EXIF publiées** (position GPS de la photo, appareil…) quand la compression était désactivée | Réglage admin **Panel → Paramètres → Métadonnées des images** (`upload_metadata_mode`) : **Supprimées** (défaut, image réécrite par Sharp même sans compression) · **Conservées** · **Option** (chaque membre choisit dans son profil, `users.keep_upload_metadata`, supprimées tant qu'il n'a rien choisi). Valeur contrôlée côté serveur (toute valeur inconnue = supprimées). Avatars : toujours nettoyés. Fichiers Premium : transmis tels quels |
+| 29 | 🟡 Moyenne | **Fichiers non tracés** : impossible de savoir qui a envoyé un fichier (obligation LCEN) | Table `uploads` : auteur (+ pseudo figé), IP, date, type, taille, nom d'origine nettoyé. Fichiers déjà envoyés retrouvés depuis les messages. Fichier effacé = trace conservée (`deleted_at`) |
+| 30 | 🟡 Moyenne | **Republier le fichier d'un autre membre** sous son propre nom (URL d'upload devinée ou copiée) | Un message image/fichier n'accepte que les fichiers envoyés par son auteur (`uploadService.isOwnUpload`) |
+| 31 | 🟡 Moyenne | **Aucun quota** : un compte pouvait remplir le disque du serveur | Quota par compte (`TIER_LIMITS.*.storageQuotaBytes`) : inscrit 200 Mo, premium 2 Go → 413 au-delà. `GET /api/upload/quota`, affiché dans « Modifier le profil » |
+
+**Bugs trouvés en route** : photos de téléphone prises en portrait enregistrées couchées (orientation EXIF perdue à la
+compression → `rotate()`) ; « Modifier le profil » effaçait les changements en cours si le profil en mémoire était rafraîchi.
+
+## Lot 4 — Renforcement, suite (🔜)
+
 - [ ] **Images des aperçus de liens** chargées directement depuis les sites tiers (`img-src https:`) → même risque de traçage d'IP que les faux GIF : les servir via notre serveur, puis restreindre `img-src`
+- [ ] Invités : jeton de renouvellement (aujourd'hui, reconnexion obligatoire après 15 min d'inactivité du WebSocket)
+- [ ] LCEN : purge automatique des traces (messages, `uploads`, `audit_logs`) au-delà de 1 an (`node-cron`)
 - [ ] Production : NGINX + HTTPS + HSTS, domaine séparé pour les fichiers uploadés, sauvegardes chiffrées
 
 ## Règles à respecter pour la suite du développement
@@ -163,3 +179,4 @@ pouvaient être **perdus** (gestionnaires enregistrés après plusieurs accès b
 10. **Avant chaque commit** : `npm run typecheck` dans `client/` et `server/` doit afficher 0 erreur (vérifié automatiquement par le hook `.githooks/pre-commit`).
 11. **Retirer quelqu'un d'un salon** (expulsion, départ, suppression de droits) : appeler `removeUserFromGroupRoom()` en plus de la base, sinon il continue de recevoir les messages en direct.
 12. **Événements WebSocket** : gestionnaires enregistrés dès la connexion (avant tout `await`), et chaque événement vérifie ses données et l'appartenance (`socket.rooms`) avant d'agir.
+13. **Fichiers envoyés** : toujours via `services/upload.service.ts` (quota `assertQuota`, traçabilité `record`, effacement `markDeleted`). Un fichier n'est utilisable dans un message que par son auteur (`isOwnUpload`). Jamais d'image externe en avatar.

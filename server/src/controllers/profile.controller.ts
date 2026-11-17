@@ -1,9 +1,11 @@
 /**
- * controllers/profile.controller.ts — FIXED: avatar upload + delete + validation
+ * controllers/profile.controller.ts — profil, avatar (fichier), statut
  */
 import type { Request, Response } from 'express';
 import { userRepository } from '../repositories/user.repository';
 import { VALIDATION } from '../../../shared/constants';
+import { uploadService, InvalidImageError, QuotaExceededError } from '../services/upload.service';
+import { getIpFromRequest } from '../utils/ip';
 
 export const profileController = {
 
@@ -11,7 +13,7 @@ export const profileController = {
   async updateProfile(req: Request, res: Response): Promise<void> {
     try {
       const userId = req.user!.userId;
-      const { username, bio, theme, gif_display } = req.body;
+      const { username, bio, theme, gif_display, keep_upload_metadata } = req.body;
       const updates: Record<string, any> = {};
 
       if (username !== undefined) {
@@ -41,6 +43,15 @@ export const profileController = {
       }
 
       // Préférence d'affichage des GIFs (null = suit la règle admin du tier)
+      // Métadonnées de mes images : true = conserver, false/null = supprimer (utile si l'admin a mis « option »)
+      if (keep_upload_metadata !== undefined) {
+        if (keep_upload_metadata !== null && typeof keep_upload_metadata !== 'boolean') {
+          res.status(400).json({ error: 'VALIDATION_ERROR', message: 'Valeur invalide pour les métadonnées', field: 'keep_upload_metadata' });
+          return;
+        }
+        updates.keep_upload_metadata = keep_upload_metadata;
+      }
+
       if (gif_display !== undefined) {
         if (gif_display === null || gif_display === 'auto' || gif_display === 'click') {
           updates.gif_display = gif_display;
@@ -70,40 +81,34 @@ export const profileController = {
     }
   },
 
-  /** PATCH /api/users/me/avatar — Upload avatar (base64 ou URL) */
-  async updateAvatar(req: Request, res: Response): Promise<void> {
+  /**
+   * POST /api/users/me/avatar — Envoi d'un avatar (fichier, champ « file », 5 Mo max)
+   * 🔐 Avant : image base64 (jusqu'à 700 Ko renvoyés avec chaque message) ou URL externe libre
+   * (traçage d'IP de tous ceux qui voyaient l'avatar). Maintenant : fichier vérifié par Sharp,
+   * converti en WebP 256×256 sans métadonnées, stocké chez nous et tracé (table uploads).
+   */
+  async uploadAvatar(req: Request, res: Response): Promise<void> {
     try {
-      const userId = req.user!.userId;
-      const { avatar_url } = req.body;
-
-      if (avatar_url === undefined) {
-        res.status(400).json({ error: 'VALIDATION_ERROR', message: 'avatar_url requis' });
+      if (!req.file) {
+        res.status(400).json({ error: 'VALIDATION_ERROR', message: 'Aucune image reçue' });
         return;
       }
-
-      // Si avatar_url est null ou vide → supprimer l'avatar
-      if (!avatar_url || avatar_url === '' || avatar_url === 'null') {
-        await userRepository.update(userId, { avatar_url: null } as any);
-        res.json({ avatar_url: null });
-        return;
-      }
-
-      // Valider la taille
-      if (typeof avatar_url === 'string' && avatar_url.length > 700000) {
-        res.status(400).json({ error: 'VALIDATION_ERROR', message: 'Image trop volumineuse (max ~500KB)' });
-        return;
-      }
-
-      // Valider le format (data URL ou URL http)
-      if (typeof avatar_url === 'string' && !avatar_url.startsWith('data:image/') && !avatar_url.startsWith('http')) {
-        res.status(400).json({ error: 'VALIDATION_ERROR', message: 'Format invalide (image base64 ou URL attendue)' });
-        return;
-      }
-
-      const user = await userRepository.update(userId, { avatar_url } as any);
-      res.json({ avatar_url: user?.avatar_url || null });
+      const user = req.user!;
+      await uploadService.assertQuota(user.userId, user.tier, 64 * 1024); // un avatar fait ~10-40 Ko
+      const avatarUrl = await uploadService.saveAvatar(req.file.buffer, { id: user.userId, username: user.username }, {
+        ip: getIpFromRequest(req), originalName: req.file.originalname,
+      });
+      res.json({ avatar_url: avatarUrl });
     } catch (error: any) {
-      console.error('❌ updateAvatar:', error);
+      if (error instanceof InvalidImageError) {
+        res.status(400).json({ error: 'VALIDATION_ERROR', message: error.message });
+        return;
+      }
+      if (error instanceof QuotaExceededError) {
+        res.status(413).json({ error: 'STORAGE_QUOTA_EXCEEDED', message: error.message });
+        return;
+      }
+      console.error('❌ uploadAvatar:', error);
       res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Erreur serveur' });
     }
   },
@@ -111,7 +116,7 @@ export const profileController = {
   /** DELETE /api/users/me/avatar — Supprimer l'avatar */
   async deleteAvatar(req: Request, res: Response): Promise<void> {
     try {
-      await userRepository.update(req.user!.userId, { avatar_url: null } as any);
+      await uploadService.removeAvatar(req.user!.userId);
       res.json({ avatar_url: null });
     } catch (error: any) {
       console.error('❌ deleteAvatar:', error);

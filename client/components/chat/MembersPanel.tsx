@@ -20,6 +20,7 @@ import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/hooks/useAuth';
 import { InviteModal } from '@/components/modals/InviteModal';
 import { showModal } from '@/components/ui/AppModal';
+import { safeAvatarUrl } from '@/lib/safeUrl';
 
 interface Member {
   id: string;
@@ -234,8 +235,8 @@ export function MembersPanel({ groupId, groupType, groupName, onMemberClick }: M
         className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg cursor-pointer hover:bg-[var(--glass-h)] transition-all group/member">
 
         <div className="relative flex-shrink-0">
-          {member.avatar_url
-            ? <img src={member.avatar_url} alt={member.username}
+          {safeAvatarUrl(member.avatar_url)
+            ? <img src={safeAvatarUrl(member.avatar_url)!} alt={member.username} loading="lazy"
                 className="w-[30px] h-[30px] rounded-[9px] object-cover shadow-[0_3px_10px_rgba(0,0,0,0.2)]" />
             : <div className={`w-[30px] h-[30px] rounded-[9px] bg-gradient-to-br ${color} flex items-center justify-center text-xs font-bold text-white shadow-[0_3px_10px_rgba(0,0,0,0.2)]`}>{initial}</div>
           }

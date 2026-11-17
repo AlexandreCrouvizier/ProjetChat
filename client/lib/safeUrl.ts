@@ -17,6 +17,14 @@ export function safeMediaUrl(url: unknown): string | null {
   }
 }
 
+/**
+ * 🔐 Avatars : uniquement nos fichiers WebP (/uploads/avatars/<uuid>.webp).
+ * Jamais d'image externe (traçage d'IP) ni de data: (ancien format base64).
+ */
+export function safeAvatarUrl(url: unknown): string | null {
+  return typeof url === 'string' && /^\/uploads\/avatars\/[0-9a-f-]{36}\.webp$/.test(url) ? url : null;
+}
+
 /** Variante stricte : uniquement https absolu (images externes, aperçus de liens) */
 export function safeHttpsUrl(url: unknown): string | null {
   const safe = safeMediaUrl(url);

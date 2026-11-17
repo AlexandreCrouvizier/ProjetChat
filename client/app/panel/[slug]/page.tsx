@@ -1702,6 +1702,72 @@ export default function AdminPanelPage() {
           )}
 
           {/* ══════════════════════════════════════════════════════
+              ONGLET PARAMÈTRES — Métadonnées des images envoyées
+          ══════════════════════════════════════════════════════ */}
+          {tab === 'settings' && !dashLoading && (
+            <div className="rounded-2xl p-5 space-y-4 mt-4 max-w-2xl ml-6"
+              style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.06)' }}>
+
+              <div className="flex items-center gap-3">
+                <span className="text-xl">🛰️</span>
+                <div>
+                  <h3 className="text-sm font-bold text-white">Métadonnées des images envoyées</h3>
+                  <p className="text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                    Données EXIF cachées dans les photos : position GPS, modèle d'appareil, date et heure de prise de vue
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                {([
+                  { v: 'strip',  desc: '🧹 Supprimées', hint: 'Retirées de toutes les images (recommandé)' },
+                  { v: 'keep',   desc: '📎 Conservées', hint: 'Images publiées avec leurs métadonnées' },
+                  { v: 'option', desc: '⚙️ Option',     hint: "Chaque membre choisit dans son profil" },
+                ]).map(({ v, desc, hint }) => (
+                  <button key={v}
+                    onClick={() => updateSetting('upload_metadata_mode', v)}
+                    title={hint}
+                    className="flex-1 py-2 rounded-lg text-[11px] font-medium transition-all"
+                    style={{
+                      background: (getSetting('upload_metadata_mode') || 'strip') === v ? 'rgba(139,92,246,0.2)' : 'rgba(255,255,255,0.03)',
+                      border: (getSetting('upload_metadata_mode') || 'strip') === v ? '1px solid rgba(139,92,246,0.4)' : '1px solid rgba(255,255,255,0.06)',
+                      color: (getSetting('upload_metadata_mode') || 'strip') === v ? '#c4b5fd' : 'rgba(255,255,255,0.4)',
+                    }}>
+                    {desc}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                {(() => {
+                  const val = getSetting('upload_metadata_mode') || 'strip';
+                  if (val === 'strip') return '→ Retirées de toutes les images des messages (recommandé : protège la vie privée des membres)';
+                  if (val === 'keep')  return '→ Les images sont publiées avec leurs métadonnées : la position GPS d\'une photo prise chez soi devient visible par tous';
+                  return '→ Supprimées par défaut ; chaque membre peut choisir de les conserver dans son profil';
+                })()}
+              </p>
+              {(getSetting('upload_metadata_mode') || 'strip') === 'keep' && (
+                <p className="text-[11px] px-3 py-2 rounded-lg"
+                  style={{ background: 'rgba(251,191,36,0.07)', color: 'rgba(251,191,36,0.7)', border: '1px solid rgba(251,191,36,0.12)' }}>
+                  ⚠️ Les membres ne sont pas prévenus : à réserver à un usage précis (ex. photos de terrain dont la localisation est utile).
+                </p>
+              )}
+              <p className="text-[10px]" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                Les avatars sont toujours nettoyés. Les fichiers Premium (PDF, vidéos…) sont transmis tels quels.
+              </p>
+
+              {'upload_metadata_mode' in settingsDirty && (
+                <div className="flex justify-end pt-2">
+                  <button onClick={saveSettings} disabled={settingsSaving}
+                    className="px-4 py-1.5 rounded-lg text-[12px] font-semibold text-white transition-all disabled:opacity-50"
+                    style={{ background: 'linear-gradient(135deg, #8b5cf6, #6d28d9)' }}>
+                    {settingsSaving ? '⏳…' : '💾 Sauvegarder'}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ══════════════════════════════════════════════════════
               ONGLET SÉCURITÉ — Phase 4.1f
           ══════════════════════════════════════════════════════ */}
           {tab === 'security' && (

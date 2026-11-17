@@ -99,4 +99,9 @@ export async function uploadFile(file: File): Promise<{ url: string; filename: s
   return postFile('/api/upload/file', file, 'Erreur upload fichier');
 }
 
+// 🔐 Avatar envoyé en fichier : le serveur le vérifie et le convertit en WebP 256×256
+export async function uploadAvatar(file: File): Promise<{ avatar_url: string }> {
+  return postFile('/api/users/me/avatar', file, 'Erreur lors de l\'envoi de l\'avatar');
+}
+
 export default api;

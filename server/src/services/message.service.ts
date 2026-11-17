@@ -16,6 +16,7 @@ import { userRepository } from '../repositories/user.repository';
 import { moderationService } from './moderation.service';
 import { linkPreviewService } from './linkPreview.service';
 import { gifService } from './gif.service';
+import { uploadService } from './upload.service';
 import { checkRateLimit } from '../middleware/rateLimit.middleware';
 import { logAudit } from '../middleware/audit.middleware';
 import { BadRequestError, ForbiddenError, RateLimitError } from '../utils/errors';
@@ -93,13 +94,17 @@ export const messageService = {
     if (data.content !== undefined && data.content !== null && typeof data.content !== 'string') {
       throw new BadRequestError('Contenu invalide');
     }
+    // 🔐 Un message ne peut contenir QUE des fichiers envoyés par son auteur (table uploads) :
+    // avant, n'importe quel fichier d'un autre membre pouvait être republié sous son nom.
     if (messageType === 'image') {
       if (data.tier === 'guest') throw new ForbiddenError('Le partage de médias est réservé aux membres inscrits.');
-      if (!data.fileUrl || !IMAGE_URL_RE.test(data.fileUrl)) throw new BadRequestError('Image invalide');
+      if (!data.fileUrl || !IMAGE_URL_RE.test(data.fileUrl)
+        || !(await uploadService.isOwnUpload(data.fileUrl, data.authorId, 'image'))) throw new BadRequestError('Image invalide');
     }
     if (messageType === 'file') {
       if (data.tier !== 'premium') throw new ForbiddenError('Le partage de fichiers est réservé aux membres Premium.');
-      if (!data.fileUrl || !FILE_URL_RE.test(data.fileUrl)) throw new BadRequestError('Fichier invalide');
+      if (!data.fileUrl || !FILE_URL_RE.test(data.fileUrl)
+        || !(await uploadService.isOwnUpload(data.fileUrl, data.authorId, 'file'))) throw new BadRequestError('Fichier invalide');
     }
     if (messageType === 'gif') {
       // 🔐 Les GIF sont réservés aux tiers qui y ont droit (avant : un invité pouvait en envoyer par WebSocket)

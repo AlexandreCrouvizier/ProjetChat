@@ -20,6 +20,7 @@ import crypto from 'crypto';
 import { env } from '../config/env';
 import { isBanActive } from '../services/accessRevocation.service';
 import { setSessionCookies } from '../utils/authCookies';
+import { uploadService } from '../services/upload.service';
 
 export const oauthController = {
 
@@ -61,7 +62,6 @@ export const oauthController = {
           await userRepository.update(user.id, {
             oauth_provider: 'google',
             oauth_id: profile.providerId,
-            avatar_url: user.avatar_url || profile.avatar,
           } as any);
         } else {
           // 3. Nouveau compte → créer
@@ -84,10 +84,6 @@ export const oauthController = {
             last_ip: ip,
           });
 
-          // Mettre à jour l'avatar si disponible
-          if (profile.avatar) {
-            await userRepository.update(user.id, { avatar_url: profile.avatar } as any);
-          }
 
           isNewUser = true;
         }
@@ -104,6 +100,12 @@ export const oauthController = {
       if (isBanActive(user)) {
         res.redirect(`${env.APP_URL}/auth_group/login?error=account_suspended`);
         return;
+      }
+
+      // 🔐 Pas encore d'avatar : la photo Google est copiée chez nous (jamais d'URL externe en avatar,
+      // les visiteurs ne chargent rien depuis Google). Non bloquant en cas d'échec.
+      if (!user.avatar_url && profile.avatar) {
+        await uploadService.importRemoteAvatar(profile.avatar, { id: user.id, username: user.username }, ip);
       }
 
       // 4. Générer les tokens JWT

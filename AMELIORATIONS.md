@@ -106,3 +106,15 @@ uniquement le jour où on en a vraiment l'usage.
 | `zod` (v4) | Vérifier la forme des données reçues par l'API (schémas) | Si on veut généraliser une validation stricte et uniforme de toutes les routes, à la place des contrôles faits à la main. |
 | `node-cron` | Tâches planifiées (« chaque nuit à 3 h ») | Pour la purge LCEN des messages > 1 an, le nettoyage des fichiers orphelins, des sessions expirées… |
 | `uuid` | Générer des identifiants uniques | **Probablement jamais** : Node.js le fait nativement avec `crypto.randomUUID()`. |
+
+---
+
+## 5. Fichiers envoyés : outils de gestion (suite du Lot 4.2b)
+
+- **Quotas réglables** dans Panel → Paramètres (aujourd'hui : inscrit 200 Mo, premium 2 Go, dans `shared/constants.ts`).
+- **Panel admin** : liste des fichiers d'un utilisateur (table `uploads` : date, IP, taille, nom d'origine), utile en cas de réquisition (LCEN) ou d'abus.
+- **« Mes fichiers »** pour les membres : voir et supprimer leurs anciens fichiers pour libérer de l'espace.
+- **Miniatures** (~400 px) générées à l'envoi pour le fil du chat (voir § 1).
+- Ménage : `shared/constants.js`, `.d.ts` et `.map` sont d'anciens fichiers compilés (avril 2026), non utilisés
+  (le serveur et le client lisent `constants.ts`) → à supprimer pour éviter toute confusion.
+

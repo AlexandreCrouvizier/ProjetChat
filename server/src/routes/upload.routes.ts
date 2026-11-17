@@ -20,20 +20,22 @@ import crypto from 'crypto';
 import { requireAuth } from '../middleware/auth.middleware';
 import { rateLimit } from '../middleware/rateLimit.middleware';
 import { db } from '../config/database';
+import { getIpFromRequest } from '../utils/ip';
+import { uploadService, QuotaExceededError, IMAGE_DIR, FILE_DIR, readableSize, parseMetadataMode, type MetadataMode } from '../services/upload.service';
 
 // ─── Sharp (optionnel) ───────────────────────────────────────────────────────
 let sharp: any = null;
 try { sharp = require('sharp'); } catch { /* compression désactivée */ }
 
 /** Lit les paramètres de compression depuis la table app_settings (cache 30s) */
-let settingsCache: { enabled: boolean; quality: number; maxPx: number; maxPxPremium: number } | null = null;
+let settingsCache: { enabled: boolean; quality: number; maxPx: number; maxPxPremium: number; metadataMode: MetadataMode } | null = null;
 let settingsCachedAt = 0;
 
 async function getCompressionSettings() {
   if (settingsCache && Date.now() - settingsCachedAt < 30_000) return settingsCache;
   try {
     const rows = await db('app_settings')
-      .whereIn('key', ['compression_enabled','compression_quality','compression_max_px','compression_max_px_premium'])
+      .whereIn('key', ['compression_enabled','compression_quality','compression_max_px','compression_max_px_premium','upload_metadata_mode'])
       .select('key','value');
     const map: Record<string, string> = {};
     for (const r of rows) map[r.key] = r.value;
@@ -42,10 +44,11 @@ async function getCompressionSettings() {
       quality:      parseInt(map['compression_quality']       || '82',   10),
       maxPx:        parseInt(map['compression_max_px']        || '1920', 10),
       maxPxPremium: parseInt(map['compression_max_px_premium']|| '2560', 10),
+      metadataMode: parseMetadataMode(map['upload_metadata_mode']),
     };
   } catch {
     // Table pas encore créée → valeurs par défaut
-    settingsCache = { enabled: true, quality: 82, maxPx: 1920, maxPxPremium: 2560 };
+    settingsCache = { enabled: true, quality: 82, maxPx: 1920, maxPxPremium: 2560, metadataMode: 'strip' };
   }
   settingsCachedAt = Date.now();
   return settingsCache!;
@@ -54,23 +57,23 @@ async function getCompressionSettings() {
 /** Invalide le cache des settings (appelé après une mise à jour admin) */
 export function invalidateSettingsCache() { settingsCache = null; }
 
-async function compressImage(inputPath: string, outputPath: string, maxPx: number, quality: number): Promise<void> {
-  await sharp(inputPath)
-    .resize(maxPx, maxPx, { fit: 'inside', withoutEnlargement: true })
-    .webp({ quality })
-    .toFile(outputPath);
+/** Settings publics utiles au client (mode des métadonnées), avec le même cache */
+export async function getUploadMetadataMode(): Promise<MetadataMode> {
+  return (await getCompressionSettings()).metadataMode;
+}
+
+async function compressImage(inputPath: string, outputPath: string, maxPx: number, quality: number, keepMetadata: boolean): Promise<void> {
+  // 🐛 rotate() : applique l'orientation EXIF (avant : une photo de téléphone prise en portrait
+  // pouvait apparaître couchée, l'orientation étant perdue lors de la conversion)
+  let pipeline = sharp(inputPath).rotate().resize(maxPx, maxPx, { fit: 'inside', withoutEnlargement: true });
+  // Sharp retire toutes les métadonnées par défaut ; on ne les garde que si le réglage le demande
+  if (keepMetadata) pipeline = pipeline.keepMetadata();
+  await pipeline.webp({ quality }).toFile(outputPath);
 }
 
 const router = express.Router();
 
-// ─── Dossiers de stockage ───────────────────────────────────────────────────
-const UPLOAD_ROOT = path.join(process.cwd(), 'uploads');
-const IMAGE_DIR   = path.join(UPLOAD_ROOT, 'images');
-const FILE_DIR    = path.join(UPLOAD_ROOT, 'files');
-
-[UPLOAD_ROOT, IMAGE_DIR, FILE_DIR].forEach((dir) => {
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-});
+// Dossiers de stockage : créés par services/upload.service.ts
 
 // ─── Storages Multer ────────────────────────────────────────────────────────
 const makeStorage = (dest: string) =>
@@ -115,12 +118,25 @@ const uploadFileMiddleware = multer({
   limits: { fileSize: 100 * 1024 * 1024 }, // 100 Mo
 });
 
-// ─── Utilitaire taille lisible ──────────────────────────────────────────────
-function readableSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} o`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} Ko`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} Mo`;
+/** Réponse « quota dépassé » (413) */
+function quotaResponse(res: Response, err: QuotaExceededError) {
+  return res.status(413).json({ error: err.message, code: 'STORAGE_QUOTA_EXCEEDED', used: err.used, quota: err.quota });
 }
+
+// ─── GET /api/upload/quota — espace utilisé / disponible ────────────────────
+router.get('/quota', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const [status, metadataMode, pref] = await Promise.all([
+      uploadService.quotaStatus(req.user!.userId, req.user!.tier),
+      getUploadMetadataMode(),
+      db('users').where({ id: req.user!.userId }).first('keep_upload_metadata'),
+    ]);
+    // + réglage des métadonnées : le profil n'affiche le choix que si l'admin a mis « option »
+    res.json({ ...status, metadata_mode: metadataMode, keep_upload_metadata: pref?.keep_upload_metadata ?? null });
+  } catch {
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
 
 // ─── POST /api/upload/image ─────────────────────────────────────────────────
 router.post('/image', requireAuth, rateLimit({ name: 'upload', max: 30, windowSeconds: 600, by: 'user' }), (req: Request, res: Response) => {
@@ -174,6 +190,8 @@ router.post('/image', requireAuth, rateLimit({ name: 'upload', max: 30, windowSe
     const baseName = req.file.filename.replace(/\.[^.]+$/, '');
     const cs = await getCompressionSettings();
     const maxPx = tier === 'premium' ? cs.maxPxPremium : cs.maxPx;
+    // Métadonnées (EXIF : GPS, appareil, date) : réglage admin, éventuellement choix du membre
+    const keepMetadata = await uploadService.shouldKeepMetadata(req.user!.userId, cs.metadataMode);
 
     let finalFilename: string;
     let finalMime: string;
@@ -184,7 +202,7 @@ router.post('/image', requireAuth, rateLimit({ name: 'upload', max: 30, windowSe
       finalFilename = `${baseName}.webp`;
       finalMime = 'image/webp';
       try {
-        await compressImage(req.file.path, path.join(IMAGE_DIR, finalFilename), maxPx, cs.quality);
+        await compressImage(req.file.path, path.join(IMAGE_DIR, finalFilename), maxPx, cs.quality, keepMetadata);
         compressed = true;
       } catch {
         safeUnlink(req.file.path);
@@ -196,12 +214,45 @@ router.post('/image', requireAuth, rateLimit({ name: 'upload', max: 30, windowSe
       // Pas de compression : on garde l'original MAIS avec l'extension du format détecté
       finalFilename = `${baseName}${IMAGE_FORMAT_EXT[format]}`;
       finalMime = format === 'jpeg' ? 'image/jpeg' : `image/${format}`;
-      fs.renameSync(req.file.path, path.join(IMAGE_DIR, finalFilename));
+      if (format === 'gif' || keepMetadata) {
+        // GIF : Sharp perdrait l'animation. Métadonnées conservées (réglage) : fichier d'origine intact.
+        fs.renameSync(req.file.path, path.join(IMAGE_DIR, finalFilename));
+      } else {
+        // 🔐 Même sans compression, l'image est réécrite pour retirer ses métadonnées
+        // (EXIF : position GPS de la photo, modèle d'appareil…), sauf si le réglage dit de les garder.
+        // (en mémoire puis écriture : le fichier reçu peut avoir exactement le même nom que le résultat)
+        let cleaned: Buffer;
+        try {
+          cleaned = await sharp(req.file.path, { limitInputPixels: 100_000_000 })
+            .rotate()
+            .toFormat(format, format === 'png' ? {} : { quality: 95 })
+            .toBuffer();
+        } catch {
+          safeUnlink(req.file.path);
+          return res.status(400).json({ error: 'Image illisible ou corrompue.' });
+        }
+        safeUnlink(req.file.path);
+        fs.writeFileSync(path.join(IMAGE_DIR, finalFilename), cleaned);
+      }
     }
     const finalSize = fs.statSync(path.join(IMAGE_DIR, finalFilename)).size;
+    const finalUrl = `/uploads/images/${finalFilename}`;
+
+    // 🔐 Quota de stockage + traçabilité (auteur, IP, date)
+    try {
+      await uploadService.assertQuota(req.user!.userId, tier, finalSize);
+      await uploadService.record({
+        userId: req.user!.userId, username: req.user!.username, kind: 'image', url: finalUrl,
+        originalName: req.file.originalname, mimeType: finalMime, sizeBytes: finalSize, ip: getIpFromRequest(req),
+      });
+    } catch (e: any) {
+      safeUnlink(path.join(IMAGE_DIR, finalFilename));
+      if (e instanceof QuotaExceededError) return quotaResponse(res, e);
+      return res.status(500).json({ error: 'Erreur serveur' });
+    }
 
     res.json({
-      url: `/uploads/images/${finalFilename}`,
+      url: finalUrl,
       filename: req.file.originalname,
       size: finalSize,
       size_readable: readableSize(finalSize),
@@ -222,7 +273,7 @@ router.post('/file', requireAuth, rateLimit({ name: 'upload', max: 30, windowSec
     });
   }
 
-  uploadFileMiddleware.single('file')(req, res, (err) => {
+  uploadFileMiddleware.single('file')(req, res, async (err) => {
     if (err instanceof multer.MulterError) {
       if (err.code === 'LIMIT_FILE_SIZE') {
         return res.status(400).json({ error: 'Fichier trop volumineux (maximum 100 Mo).' });
@@ -239,8 +290,22 @@ router.post('/file', requireAuth, rateLimit({ name: 'upload', max: 30, windowSec
       return res.status(400).json({ error: `Type de fichier non autorisé (${ext || 'sans extension'}).` });
     }
 
+    const fileUrl = `/uploads/files/${req.file.filename}`;
+    // 🔐 Quota de stockage + traçabilité (auteur, IP, date)
+    try {
+      await uploadService.assertQuota(req.user!.userId, tier, req.file.size);
+      await uploadService.record({
+        userId: req.user!.userId, username: req.user!.username, kind: 'file', url: fileUrl,
+        originalName: req.file.originalname, mimeType: req.file.mimetype, sizeBytes: req.file.size, ip: getIpFromRequest(req),
+      });
+    } catch (e: any) {
+      safeUnlink(req.file.path);
+      if (e instanceof QuotaExceededError) return quotaResponse(res, e);
+      return res.status(500).json({ error: 'Erreur serveur' });
+    }
+
     res.json({
-      url: `/uploads/files/${req.file.filename}`,
+      url: fileUrl,
       filename: req.file.originalname,
       size: req.file.size,
       size_readable: readableSize(req.file.size),

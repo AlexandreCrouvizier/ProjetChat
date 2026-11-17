@@ -14,6 +14,7 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '@/lib/api';
 import { showModal } from '@/components/ui/AppModal';
+import { safeAvatarUrl } from '@/lib/safeUrl';
 
 interface ProfileModalProps {
   userId: string | null;
@@ -162,8 +163,8 @@ export function ProfileModal({ userId, currentUserId, currentUserTier, isOpen, o
             {/* Avatar */}
             <div className="px-5 -mt-[38px]">
               <div className="relative inline-block">
-                {profile.avatar_url ? (
-                  <img src={profile.avatar_url} alt={profile.username} className="w-[76px] h-[76px] rounded-2xl border-4 border-[var(--bg)] shadow-[0_8px_24px_rgba(0,0,0,0.3)] object-cover" />
+                {safeAvatarUrl(profile.avatar_url) ? (
+                  <img src={safeAvatarUrl(profile.avatar_url)!} alt={profile.username} className="w-[76px] h-[76px] rounded-2xl border-4 border-[var(--bg)] shadow-[0_8px_24px_rgba(0,0,0,0.3)] object-cover" />
                 ) : (
                   <div className={`w-[76px] h-[76px] rounded-2xl border-4 border-[var(--bg)] bg-gradient-to-br ${getAvatarColor(profile.username)} flex items-center justify-center text-2xl font-bold text-white shadow-[0_8px_24px_rgba(0,0,0,0.3)]`}>
                     {profile.username.charAt(0).toUpperCase()}

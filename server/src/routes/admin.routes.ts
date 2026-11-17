@@ -517,6 +517,11 @@ adminRouter.patch('/settings', async (req, res) => {
       return res.status(400).json({ error: 'Aucune valeur fournie' });
     }
 
+    // 🔐 Valeurs contrôlées pour les réglages à choix fermé
+    if ('upload_metadata_mode' in updates && !['strip', 'keep', 'option'].includes(String(updates.upload_metadata_mode))) {
+      return res.status(400).json({ error: 'Valeur invalide pour upload_metadata_mode (strip | keep | option)' });
+    }
+
     for (const [key, value] of Object.entries(updates)) {
       await db('app_settings')
         .where({ key })
