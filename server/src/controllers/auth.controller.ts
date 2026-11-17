@@ -107,6 +107,28 @@ export const authController = {
       const refreshToken = readRequestCookie(req, COOKIE.refresh);
 
       if (!refreshToken) {
+        // Invité : renouvellement par son secret de reconnexion (cookie httpOnly chatapp_guest)
+        const guestSecret = readRequestCookie(req, COOKIE.guest);
+        if (guestSecret) {
+          let result;
+          try {
+            result = await authService.refreshGuest({
+              guestSecret, ip: getIpFromRequest(req), userAgent: req.headers['user-agent'],
+            });
+          } catch (error) {
+            // Refus (invité banni, secret inconnu…) : même réponse qu'avant, SANS effacer les cookies.
+            // Le jeton d'accès d'un banni est de toute façon refusé (marqueur de révocation) ; s'il est
+            // débanni, son jeton encore valide refonctionne aussitôt.
+            if (error instanceof AppError && error.statusCode === 401) {
+              res.status(401).json({ error: 'NO_SESSION', message: error.message });
+              return;
+            }
+            throw error;
+          }
+          setSessionCookies(res, result);
+          res.json(withoutTokens(result));
+          return;
+        }
         res.status(401).json({
           error: 'NO_SESSION',
           message: 'Aucune session à renouveler',

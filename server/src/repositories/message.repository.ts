@@ -50,8 +50,10 @@ export const messageRepository = {
     groupId: string;
     limit?: number;
     before?: string;
+    /** Restriction d'historique (history.service) appliquée à la requête */
+    restrict?: (query: any) => any;
   }): Promise<MessageWithAuthor[]> {
-    const { groupId, limit = 50, before } = params;
+    const { groupId, limit = 50, before, restrict } = params;
 
     let query = db('messages')
       .leftJoin('users', 'messages.author_id', '=', 'users.id')
@@ -62,12 +64,13 @@ export const messageRepository = {
       .whereNull('messages.parent_message_id')
       .select(MESSAGE_WITH_AUTHOR_SELECT)
       .orderBy('messages.created_at', 'desc')
-      .limit(Math.min(limit, 100));
+      .limit(Math.min(limit, 101));
 
     if (before) {
-      const cursor = await db('messages').where({ id: before }).select('created_at').first();
-      if (cursor) query = query.where('messages.created_at', '<', cursor.created_at);
+      // Comparaison en SQL (précision de la base, pas de la milliseconde JavaScript)
+      query = query.whereRaw('messages.created_at < (SELECT created_at FROM messages WHERE id = ?)', [before]);
     }
+    if (restrict) query = restrict(query);
 
     return (await query).reverse();
   },

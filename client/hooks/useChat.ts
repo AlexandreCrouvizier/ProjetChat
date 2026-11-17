@@ -40,6 +40,8 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [hasMore, setHasMore] = useState(false);
+  // 🔒 Historique limité par l'administrateur pour ce type de compte (renvoyé par le serveur)
+  const [historyInfo, setHistoryInfo] = useState<{ limited: boolean; rule: string; limit: number } | null>(null);
   const [typingUsers, setTypingUsers] = useState<Array<{ id: string; username: string }>>([]);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const lastTypingEmitRef = useRef<number>(0);
@@ -54,6 +56,7 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
       if (before) setMessages(prev => [...data.messages, ...prev]);
       else setMessages(data.messages);
       setHasMore(data.has_more);
+      setHistoryInfo(data.history || null);
     } catch (err) { console.error('Erreur chargement messages:', err); }
     setIsLoading(false);
   }, [groupId]);
@@ -198,5 +201,5 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
     if (messages.length > 0 && hasMore) loadMessages(messages[0].id);
   }, [messages, hasMore, loadMessages]);
 
-  return { messages, isLoading, hasMore, typingUsers, sendMessage, sendMediaMessage, toggleReaction, emitTyping, loadMore };
+  return { messages, isLoading, hasMore, historyInfo, typingUsers, sendMessage, sendMediaMessage, toggleReaction, emitTyping, loadMore };
 }

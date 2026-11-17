@@ -18,6 +18,8 @@ interface MessageListProps {
   isLoading: boolean;
   hasMore: boolean;
   onLoadMore: () => void;
+  /** Historique limité par l'administrateur (affiché en haut quand il n'y a plus rien à charger) */
+  historyInfo?: { limited: boolean; rule: string; limit: number } | null;
   onToggleReaction: (messageId: string, emoji: string) => void;
   onAvatarClick?: (userId: string) => void;
   onReport?: (msg: ChatMessage) => void;
@@ -60,7 +62,7 @@ function Avatar({ username, avatarUrl, size = 'md', onClick }: { username: strin
   );
 }
 
-export function MessageList({ messages, isLoading, hasMore, onLoadMore, onToggleReaction, onAvatarClick, onReport, onMuteAlert, currentUserId, currentUserTier, currentUsername, groupId, blockedUserIds }: MessageListProps) {
+export function MessageList({ messages, isLoading, hasMore, onLoadMore, onToggleReaction, onAvatarClick, onReport, onMuteAlert, currentUserId, currentUserTier, currentUsername, groupId, blockedUserIds, historyInfo }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const prevCount = useRef(0);
@@ -85,6 +87,13 @@ export function MessageList({ messages, isLoading, hasMore, onLoadMore, onToggle
   return (
     <div ref={containerRef} className="flex-1 overflow-y-auto px-5 py-4">
       {hasMore && <div className="text-center mb-4"><button onClick={onLoadMore} disabled={isLoading} className="text-xs text-[var(--acc)] hover:underline disabled:opacity-50">{isLoading ? '⏳ Chargement...' : '↑ Charger les messages précédents'}</button></div>}
+      {!hasMore && historyInfo?.limited && messages.length > 0 && (
+        <div className="text-center mb-4 text-[11px] text-[var(--t3)]">
+          🔒 {historyInfo.rule === 'before_join'
+            ? 'Les messages plus anciens que votre arrivée dans ce salon ne sont pas disponibles.'
+            : 'Les messages plus anciens ne sont pas disponibles.'}
+        </div>
+      )}
       {isLoading && messages.length === 0 && <div className="text-center text-[var(--t3)] text-sm py-8">⏳ Chargement des messages...</div>}
       {!isLoading && messages.length === 0 && <div className="text-center text-[var(--t3)] text-sm py-16"><div className="text-4xl mb-3">💬</div><p>Aucun message pour l&apos;instant.</p><p className="mt-1">Soyez le premier à écrire !</p></div>}
 

@@ -5,36 +5,33 @@
  *   1. Middleware Express (pour les routes REST)
  *   2. Fonction directe (pour les événements WebSocket)
  * 
- * Le rate limit est différent selon le tier :
- *   - Invité  : 1 message / 10 secondes
- *   - Inscrit : 1 message / 1 seconde
- *   - Premium : 1 message / 0.5 seconde
+ * Le délai entre deux messages dépend du type de compte et se règle dans Panel → Paramètres
+ * (par défaut : invité 10 s, inscrit 1 s, premium 0,5 s).
  */
 
 import type { Request, Response, NextFunction } from 'express';
 import { redis } from '../config/redis';
-import { TIER_LIMITS } from '../../../shared/constants';
+import { settingsService } from '../services/settings.service';
 import { getIpFromRequest } from '../utils/ip';
 
 /**
- * Vérifie si un utilisateur peut envoyer un message (rate limit)
- * Retourne true si autorisé, false si limité
+ * Vérifie si un utilisateur peut envoyer un message (délai minimum entre deux messages).
+ * Le délai dépend du type de compte et se règle dans Panel → Paramètres (settings.service).
+ * Retourne { allowed, delayMs } — delayMs sert au message d'erreur affiché au membre.
  */
-export async function checkRateLimit(userId: string, tier: string): Promise<boolean> {
+export async function checkRateLimit(userId: string, tier: string): Promise<{ allowed: boolean; delayMs: number }> {
   const key = `ratelimit:msg:${userId}`;
-  
-  // Récupère le délai en ms selon le tier
-  const tierConfig = TIER_LIMITS[tier as keyof typeof TIER_LIMITS];
-  if (!tierConfig) return true;
-  
-  const delayMs = tierConfig.rateLimitMs;
-  const delaySeconds = Math.ceil(delayMs / 1000);
+  const delayMs = (await settingsService.forTier(tier)).rateLimitMs;
 
-  // Redis SET NX = "set only if not exists" + TTL
-  // Si la clé existe déjà → le rate limit n'est pas écoulé → bloqué
-  const result = await redis.set(key, '1', 'EX', delaySeconds, 'NX');
-  
-  return result === 'OK';  // 'OK' = clé créée = autorisé, null = existait déjà = bloqué
+  try {
+    // Redis SET NX PX = « crée la clé seulement si elle n'existe pas », durée en millisecondes
+    // (avant : EX en secondes arrondies → 0,5 s devenait 1 s)
+    const result = await redis.set(key, '1', 'PX', delayMs, 'NX');
+    return { allowed: result === 'OK', delayMs };
+  } catch (err) {
+    console.error('⚠️ Rate limit indisponible (Redis) :', (err as any)?.message || err);
+    return { allowed: true, delayMs };
+  }
 }
 
 /**

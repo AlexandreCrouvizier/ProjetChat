@@ -57,7 +57,7 @@ export const conversationRepository = {
         .leftJoin('users', 'messages.author_id', '=', 'users.id')
         .where('messages.conversation_id', conv.id).where('messages.is_hidden', false)
         .orderBy('messages.created_at', 'desc')
-        .select('messages.content', 'users.username as author_username').first();
+        .select('messages.content', 'messages.type', 'users.username as author_username').first();
 
       const unreadQuery = db('messages')
         .where('conversation_id', conv.id).where('is_hidden', false).where('author_id', '!=', userId);
@@ -66,7 +66,9 @@ export const conversationRepository = {
 
       enriched.push({
         ...conv,
-        last_message_content: lastMsg?.content || null,
+        // Média sans texte : aperçu lisible dans la liste des conversations
+        last_message_content: lastMsg?.content
+          || (lastMsg?.type === 'image' ? '📷 Image' : lastMsg?.type === 'gif' ? '🎞️ GIF' : lastMsg?.type === 'file' ? '📎 Fichier' : null),
         last_message_author: lastMsg?.author_username || null,
         unread_count: parseInt(result?.count as string, 10) || 0,
       });

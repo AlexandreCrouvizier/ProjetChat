@@ -21,21 +21,22 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { rateLimit } from '../middleware/rateLimit.middleware';
 import { db } from '../config/database';
 import { getIpFromRequest } from '../utils/ip';
-import { uploadService, QuotaExceededError, IMAGE_DIR, FILE_DIR, readableSize, parseMetadataMode, type MetadataMode } from '../services/upload.service';
+import { uploadService, QuotaExceededError, IMAGE_DIR, FILE_DIR, readableSize, type MetadataMode } from '../services/upload.service';
+import { settingsService } from '../services/settings.service';
 
 // ─── Sharp (optionnel) ───────────────────────────────────────────────────────
 let sharp: any = null;
 try { sharp = require('sharp'); } catch { /* compression désactivée */ }
 
 /** Lit les paramètres de compression depuis la table app_settings (cache 30s) */
-let settingsCache: { enabled: boolean; quality: number; maxPx: number; maxPxPremium: number; metadataMode: MetadataMode } | null = null;
+let settingsCache: { enabled: boolean; quality: number; maxPx: number; maxPxPremium: number } | null = null;
 let settingsCachedAt = 0;
 
 async function getCompressionSettings() {
   if (settingsCache && Date.now() - settingsCachedAt < 30_000) return settingsCache;
   try {
     const rows = await db('app_settings')
-      .whereIn('key', ['compression_enabled','compression_quality','compression_max_px','compression_max_px_premium','upload_metadata_mode'])
+      .whereIn('key', ['compression_enabled','compression_quality','compression_max_px','compression_max_px_premium'])
       .select('key','value');
     const map: Record<string, string> = {};
     for (const r of rows) map[r.key] = r.value;
@@ -44,11 +45,10 @@ async function getCompressionSettings() {
       quality:      parseInt(map['compression_quality']       || '82',   10),
       maxPx:        parseInt(map['compression_max_px']        || '1920', 10),
       maxPxPremium: parseInt(map['compression_max_px_premium']|| '2560', 10),
-      metadataMode: parseMetadataMode(map['upload_metadata_mode']),
     };
   } catch {
     // Table pas encore créée → valeurs par défaut
-    settingsCache = { enabled: true, quality: 82, maxPx: 1920, maxPxPremium: 2560, metadataMode: 'strip' };
+    settingsCache = { enabled: true, quality: 82, maxPx: 1920, maxPxPremium: 2560 };
   }
   settingsCachedAt = Date.now();
   return settingsCache!;
@@ -57,9 +57,9 @@ async function getCompressionSettings() {
 /** Invalide le cache des settings (appelé après une mise à jour admin) */
 export function invalidateSettingsCache() { settingsCache = null; }
 
-/** Settings publics utiles au client (mode des métadonnées), avec le même cache */
-export async function getUploadMetadataMode(): Promise<MetadataMode> {
-  return (await getCompressionSettings()).metadataMode;
+/** Mode des métadonnées applicable au type de compte (réglage admin par tier) */
+async function metadataModeFor(tier: string): Promise<MetadataMode> {
+  return (await settingsService.forTier(tier)).metadataMode;
 }
 
 async function compressImage(inputPath: string, outputPath: string, maxPx: number, quality: number, keepMetadata: boolean): Promise<void> {
@@ -128,7 +128,7 @@ router.get('/quota', requireAuth, async (req: Request, res: Response) => {
   try {
     const [status, metadataMode, pref] = await Promise.all([
       uploadService.quotaStatus(req.user!.userId, req.user!.tier),
-      getUploadMetadataMode(),
+      metadataModeFor(req.user!.tier),
       db('users').where({ id: req.user!.userId }).first('keep_upload_metadata'),
     ]);
     // + réglage des métadonnées : le profil n'affiche le choix que si l'admin a mis « option »
@@ -191,7 +191,7 @@ router.post('/image', requireAuth, rateLimit({ name: 'upload', max: 30, windowSe
     const cs = await getCompressionSettings();
     const maxPx = tier === 'premium' ? cs.maxPxPremium : cs.maxPx;
     // Métadonnées (EXIF : GPS, appareil, date) : réglage admin, éventuellement choix du membre
-    const keepMetadata = await uploadService.shouldKeepMetadata(req.user!.userId, cs.metadataMode);
+    const keepMetadata = await uploadService.shouldKeepMetadata(req.user!.userId, await metadataModeFor(tier));
 
     let finalFilename: string;
     let finalMime: string;

@@ -356,6 +356,32 @@ export const authService = {
   },
 
   /**
+   * Renouvellement de session d'un INVITÉ (il n'a pas de jeton de renouvellement) :
+   * le secret de reconnexion (cookie httpOnly chatapp_guest, chemin /api/auth) suffit à obtenir
+   * un nouveau jeton d'accès, avec les mêmes contrôles qu'une reconnexion (ban du compte, de
+   * l'empreinte, de l'IP). Ne crée JAMAIS de compte : secret inconnu = 401.
+   * Avant : un invité devait se reconnecter après 15 min (expiration du jeton d'accès).
+   */
+  async refreshGuest(data: { guestSecret?: string; ip: string; userAgent?: string }) {
+    const secretHash = isWellFormedGuestSecret(data.guestSecret) ? hashGuestSecret(data.guestSecret) : null;
+    if (!secretHash) throw new UnauthorizedError('Aucune session à renouveler');
+    const user = await db('users').where({ guest_secret_hash: secretHash, tier: 'guest' }).first();
+    if (!user) throw new UnauthorizedError('Aucune session à renouveler');
+
+    if (isBanActive(user)) throw new UnauthorizedError('Compte suspendu');
+    if (user.guest_fingerprint && (await guestSecurityService.isFingerprintBanned(user.guest_fingerprint)).banned) {
+      throw new UnauthorizedError('Compte suspendu');
+    }
+    if ((await guestSecurityService.isIpPermabanned(data.ip)).banned) {
+      throw new UnauthorizedError('Accès refusé depuis cette adresse réseau.');
+    }
+
+    await db('users').where({ id: user.id }).update({ last_ip: data.ip, last_seen_at: db.fn.now() });
+    const payload = { userId: user.id, username: user.username, tier: 'guest' };
+    return { user: this.sanitizeUser(user), access_token: generateAccessToken(payload) };
+  },
+
+  /**
    * Renouveler les tokens via le refresh token
    */
   async refreshTokens(data: {

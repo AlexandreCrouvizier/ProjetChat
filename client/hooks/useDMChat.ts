@@ -92,6 +92,29 @@ export function useDMChat(conversationId: string | null, currentUserId: string |
     });
   }, [conversationId]);
 
+  // ⭐ Média en message privé (image, GIF, fichier) : mêmes contrôles côté serveur que dans les salons
+  const sendMediaMessage = useCallback(async (params: {
+    type: 'image' | 'gif' | 'file';
+    file_url?: string;
+    gif_url?: string;
+    content?: string;
+  }) => {
+    const socket = getSocket();
+    if (!socket || !conversationId) return;
+    return new Promise<ChatMessage>((resolve, reject) => {
+      socket.emit('dm:send', {
+        conversation_id: conversationId,
+        content: params.content || '',
+        type: params.type,
+        file_url: params.file_url,
+        gif_url: params.gif_url,
+      }, (response: any) => {
+        if (response.success) resolve(response.message);
+        else reject(new Error(response.error));
+      });
+    });
+  }, [conversationId]);
+
   const toggleReaction = useCallback((messageId: string, emoji: string) => {
     const socket = getSocket();
     if (socket) socket.emit('reaction:toggle', { message_id: messageId, emoji });
@@ -101,5 +124,5 @@ export function useDMChat(conversationId: string | null, currentUserId: string |
     if (messages.length > 0 && hasMore) loadMessages(messages[0].id);
   }, [messages, hasMore, loadMessages]);
 
-  return { messages, isLoading, hasMore, typingUsers: [] as any[], sendMessage, toggleReaction, emitTyping: () => {}, loadMore };
+  return { messages, isLoading, hasMore, typingUsers: [] as any[], sendMessage, sendMediaMessage, toggleReaction, emitTyping: () => {}, loadMore };
 }

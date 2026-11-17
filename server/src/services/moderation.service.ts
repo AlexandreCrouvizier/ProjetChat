@@ -10,6 +10,7 @@
  */
 
 import { redis } from '../config/redis';
+import { settingsService } from './settings.service';
 
 // Liste de mots/expressions interdits (insensible à la casse)
 // Tu peux compléter cette liste selon tes besoins
@@ -55,6 +56,7 @@ export const moderationService = {
     content: string;
     userId: string;
     groupId: string;
+    tier?: string;
   }): Promise<ModerationResult> {
     const { content, userId, groupId } = params;
     const contentLower = content.toLowerCase().trim();
@@ -84,7 +86,8 @@ export const moderationService = {
     }
 
     // 3. Détection de flood — Messages identiques répétés
-    const floodCheck = await this.checkFlood(userId, groupId, contentLower);
+    const maxPerMinute = (await settingsService.forTier(params.tier)).floodMaxPerMinute;
+    const floodCheck = await this.checkFlood(userId, groupId, contentLower, maxPerMinute);
     if (!floodCheck.allowed) {
       return floodCheck;
     }
@@ -117,17 +120,28 @@ export const moderationService = {
 
   /**
    * Détecte le flood : messages identiques ou trop fréquents
-   * Stocke les 5 derniers messages dans Redis avec un TTL de 60s
+   * Garde les derniers messages horodatés dans Redis ; seuls ceux des 60 dernières secondes comptent
    */
-  async checkFlood(userId: string, groupId: string, content: string): Promise<ModerationResult> {
+  async checkFlood(userId: string, groupId: string, content: string, maxPerMinute = 5): Promise<ModerationResult> {
     const key = `flood:${userId}:${groupId}`;
-    
+    const max = Math.max(1, Math.floor(maxPerMinute));
+
     try {
-      // Récupérer les messages récents de cet utilisateur dans ce groupe
-      const recentMessages = await redis.lrange(key, 0, 4);
-      
+      // Messages récents de cet utilisateur dans ce salon, horodatés : seuls ceux des 60 dernières
+      // secondes comptent (🐛 avant, chaque message relançait le délai de 60 s de toute la liste :
+      // 5 messages espacés de 30 s suffisaient à être bloqué)
+      const now = Date.now();
+      const recentMessages = (await redis.lrange(key, 0, max - 1))
+        .map((entry) => {
+          const sep = entry.indexOf('|');
+          return { at: Number(entry.slice(0, sep)), text: entry.slice(sep + 1) };
+        })
+        .filter((m) => Number.isFinite(m.at) && now - m.at < 60_000)
+        .map((m) => m.text);
+
       // Vérifier si le même message a été envoyé récemment
-      const duplicateCount = recentMessages.filter(msg => msg === content).length;
+      // (🐛 un média seul a un texte vide : ce n'est pas une « répétition »)
+      const duplicateCount = content ? recentMessages.filter(msg => msg === content).length : 0;
       if (duplicateCount >= 2) {
         return {
           allowed: false,
@@ -136,8 +150,8 @@ export const moderationService = {
         };
       }
 
-      // Vérifier si l'utilisateur envoie trop de messages (> 5 en 60s)
-      if (recentMessages.length >= 5) {
+      // Nombre maximum de messages par minute dans ce salon (réglable par type de compte)
+      if (recentMessages.length >= max) {
         return {
           allowed: false,
           reason: 'Vous envoyez des messages trop rapidement',
@@ -146,8 +160,8 @@ export const moderationService = {
       }
 
       // Ajouter le message à la liste
-      await redis.lpush(key, content);
-      await redis.ltrim(key, 0, 4);  // Garder seulement les 5 derniers
+      await redis.lpush(key, `${now}|${content}`);
+      await redis.ltrim(key, 0, max - 1);
       await redis.expire(key, 60);    // TTL 60 secondes
 
     } catch (err) {

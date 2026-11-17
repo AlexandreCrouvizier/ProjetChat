@@ -174,10 +174,41 @@ La déconnexion affichait l'accueil (navigation interne), qui consommait le moti
 → le motif n'est plus lu pendant la sortie (`lib/banGuard.ts`), et le serveur envoie la notification **avant**
 de couper l'accès (`accessRevocation.service.ts`).
 
+## Lot 4.3 — Réglages par type de compte, historique, GitHub, LCEN (✅ fait le 17/11/2026)
+
+Vérifié par **68 nouveaux tests automatisés** (`outils-tests/e2e-lot43.mjs`) + **20 tests navigateur**
+(`e2e-reglages-navigateur.mjs`), en plus de toutes les suites précédentes (toujours au vert). Migration **11**.
+
+**Nouveaux réglages (Panel → Paramètres), par type de compte** — toutes les valeurs sont contrôlées par le serveur
+(`services/settings.service.ts` → `validateSettingUpdate` : choix fermés, bornes), chaque changement est tracé
+dans le journal (qui, quand, ancienne → nouvelle valeur) :
+- **Métadonnées des images** : Supprimées / Conservées / Option, pour les inscrits et les Premium (invités : pas d'envoi d'images).
+  L'ancien réglage global est repris pour les deux types de compte à la migration.
+- **Historique des salons** : ♾️ Tout · ⏮️ Avant l'arrivée (les N messages précédant la **première** arrivée, puis tout ce qui suit ;
+  quitter et revenir ne donne pas plus d'historique, table `group_arrivals`) · 🔢 Derniers (fenêtre glissante des N derniers).
+  Curseur à paliers (0→10 par 1, 10→50 par 5, 50→100 par 10, puis plus large jusqu'à 10 000) + valeur libre (jusqu'à 100 000).
+- **Rythme d'envoi** : délai entre deux messages (0,2 s → 10 min) et messages par minute dans un salon (1 → 60).
+- **Conservation des traces** (LCEN) : 365 jours minimum, purge automatique + bouton « purger maintenant ».
+
+| # | Gravité | Faille | Correction |
+|---|---|---|---|
+| 35 | 🟠 Élevée | **Connexion Google sans paramètre « state »** (CSRF de connexion) : un site malveillant pouvait connecter un visiteur au compte de l'attaquant, qui récupérait ensuite ce que la victime y écrivait | « state » aléatoire de 256 bits en cookie httpOnly (`SameSite=Lax`, 10 min, chemin `/api/auth/oauth`), vérifié à temps constant au retour, à usage unique (`config/oauthState.ts`). Même protection pour GitHub |
+| 36 | 🟠 Élevée | **Historique limité contournable** si on ne filtrait que l'affichage | Filtre appliqué **côté serveur** (`services/history.service.ts`) : liste des messages et pagination, fils (403), citations masquées (« Message antérieur non disponible »), et **interdiction de citer ou de répondre en fil** à un message hors de sa fenêtre (sinon son contenu repartait à tout le salon). Visiteur non connecté = règle des invités ; superadmin : tout |
+| 37 | 🟡 Moyenne | **Connexion GitHub** : l'adresse e-mail publique d'un profil GitHub n'est pas forcément vérifiée → risque de prise de contrôle d'un compte existant | Seule l'adresse **principale et vérifiée** (API `/user/emails`) est utilisée ; sans adresse vérifiée, jamais de liaison à un compte existant. Photo de profil copiée chez nous (`avatars.githubusercontent.com` uniquement) |
+| 38 | 🟡 Moyenne | **Traces conservées sans limite** (IP des messages, journaux de connexion) : contraire au RGPD au-delà de l'obligation LCEN d'un an | Purge au démarrage puis toutes les 24 h (`services/lcen.service.ts`) : IP des messages, fichiers, actions de modération et comptes inactifs ; journal `audit_logs` et historique IP des invités ; sessions expirées. **Les messages ne sont pas supprimés**, les bannissements actifs sont conservés |
+| 39 | 🟢 Faible | Réglages du panel enregistrés **sans contrôle de valeur ni trace** (seules les métadonnées étaient vérifiées) | Règle par clé (choix fermés, bornes), clés inconnues ignorées (aucune création depuis le panel), journal des changements |
+
+**Améliorations livrées** : délais entre messages et anti-flood réglables, médias (images, GIF, fichiers) en messages
+privés avec les mêmes contrôles que dans les salons, connexion GitHub, **invités : session renouvelée** grâce à leur
+secret de reconnexion (avant : reconnexion obligatoire au bout de 15 min ; secret inconnu ou invité banni → refusé).
+
+**Bugs trouvés en route** : l'anti-flood bloquait un membre qui envoyait 5 messages espacés de 30 s (chaque message
+relançait le délai de toute la liste) ; plusieurs GIF ou images à la suite étaient refusés comme « message répété »
+(texte vide) ; le délai Premium de 0,5 s était arrondi à 1 s ; la pagination de l'historique pouvait sauter un
+message à la milliseconde près.
+
 ## Lot 4 — Renforcement, suite (🔜)
 
-- [ ] Invités : jeton de renouvellement (aujourd'hui, reconnexion obligatoire après 15 min d'inactivité du WebSocket)
-- [ ] LCEN : purge automatique des traces (messages, `uploads`, `audit_logs`) au-delà de 1 an (`node-cron`)
 - [ ] Production : NGINX + HTTPS + HSTS, domaine séparé pour les fichiers uploadés, sauvegardes chiffrées
 
 ## Règles à respecter pour la suite du développement
@@ -195,3 +226,5 @@ de couper l'accès (`accessRevocation.service.ts`).
 11. **Retirer quelqu'un d'un salon** (expulsion, départ, suppression de droits) : appeler `removeUserFromGroupRoom()` en plus de la base, sinon il continue de recevoir les messages en direct.
 12. **Événements WebSocket** : gestionnaires enregistrés dès la connexion (avant tout `await`), et chaque événement vérifie ses données et l'appartenance (`socket.rooms`) avant d'agir.
 13. **Fichiers envoyés** : toujours via `services/upload.service.ts` (quota `assertQuota`, traçabilité `record`, effacement `markDeleted`). Un fichier n'est utilisable dans un message que par son auteur (`isOwnUpload`). Jamais d'image externe en avatar.
+14. **Réglages du panel** : toute nouvelle clé de `app_settings` modifiable depuis le panel doit avoir sa règle dans `validateSettingUpdate()` (`services/settings.service.ts`) et être lue via `settingsService` (cache 30 s invalidé à chaque modification).
+15. **Lire des messages d'un salon** (nouvelle route, recherche, export…) : appliquer la fenêtre d'historique (`historyService.windowFor` + `apply` / `visibleIds`), sinon la limite d'historique est contournable.

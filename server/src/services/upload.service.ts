@@ -31,7 +31,7 @@ export type UploadKind = 'image' | 'file' | 'avatar';
 export const AVATAR_SIZE_PX = 256;
 export const AVATAR_MAX_INPUT_BYTES = 5 * 1024 * 1024;   // 5 Mo avant traitement
 export const AVATAR_URL_RE = /^\/uploads\/avatars\/[0-9a-f-]{36}\.webp$/;
-const REMOTE_AVATAR_HOSTS = ['googleusercontent.com'];     // photo de profil Google uniquement
+const REMOTE_AVATAR_HOSTS = ['googleusercontent.com', 'avatars.githubusercontent.com']; // photos de profil Google / GitHub uniquement
 
 export class InvalidImageError extends Error {}
 
@@ -172,8 +172,8 @@ export const uploadService = {
   },
 
   /**
-   * Photo de profil Google : copiée UNE fois chez nous (plus aucun visiteur ne charge d'image chez Google).
-   * Hôte limité à googleusercontent.com, 5 Mo max, 5 s max. Échec = pas d'avatar (non bloquant).
+   * Photo de profil Google / GitHub : copiée UNE fois chez nous (aucun visiteur ne charge d'image chez eux).
+   * Hôtes limités à googleusercontent.com / avatars.githubusercontent.com, 5 Mo max, 5 s max. Échec = pas d'avatar (non bloquant).
    */
   async importRemoteAvatar(remoteUrl: unknown, user: { id: string; username?: string }, ip?: string): Promise<void> {
     try {
@@ -194,7 +194,7 @@ export const uploadService = {
         if (total > AVATAR_MAX_INPUT_BYTES) { await reader.cancel(); return; }
         chunks.push(value);
       }
-      await this.saveAvatar(Buffer.concat(chunks), user, { ip, originalName: 'photo Google' });
+      await this.saveAvatar(Buffer.concat(chunks), user, { ip, originalName: 'photo de profil' });
     } catch (error: any) {
       logger.warn(`Import de l'avatar Google impossible : ${error?.message || error}`);
     }

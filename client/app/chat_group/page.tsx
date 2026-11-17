@@ -160,9 +160,8 @@ function ChatPageContent() {
 
   // ⭐ Phase 4.1 — Envoi d'un média (image, gif, fichier)
   const handleSendMedia = async (params: { type: 'image' | 'gif' | 'file'; file_url?: string; gif_url?: string; content?: string }) => {
-    // Les médias ne sont pas encore pris en charge en message privé (dm:send = texte uniquement)
-    if (mode !== 'group') { showModal("L'envoi d'images, de GIF et de fichiers n'est pas encore disponible en message privé.", 'warning'); return; }
-    try { await groupChat.sendMediaMessage(params); }
+    // Salon ou message privé : les mêmes contrôles s'appliquent côté serveur
+    try { await activeChat.sendMediaMessage(params); }
     catch (err: any) {
       const msg = err.message || '';
       if (msg.includes('muté') || msg.includes('muted') || err.muted) {
@@ -256,7 +255,8 @@ function ChatPageContent() {
           onLoadMore={activeChat.loadMore} onToggleReaction={activeChat.toggleReaction}
           onAvatarClick={handleAvatarClick} currentUserId={user?.id || ''} currentUserTier={user?.tier || 'guest'}
           currentUsername={user?.username} groupId={mode === 'group' ? activeGroupId : null}
-          onReport={handleReport} onMuteAlert={(info) => setMuteInfo(info)} blockedUserIds={blockedIds} />
+          onReport={handleReport} onMuteAlert={(info) => setMuteInfo(info)} blockedUserIds={blockedIds}
+          historyInfo={mode === 'group' ? groupChat.historyInfo : null} />
 
         {mode === 'group' && groupChat.typingUsers.length > 0 && (
           <div className="px-6 py-1.5 text-[11px] text-[var(--t3)] flex items-center gap-2">

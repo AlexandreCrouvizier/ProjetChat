@@ -51,47 +51,19 @@ sur une version de Next.js à jour.
 
 ---
 
-## 2. Délais minimum entre deux messages modifiables dans le panel Admin
+## 2. Délais minimum entre deux messages modifiables dans le panel Admin — ✅ fait (Lot 4.3, 17/11/2026)
 
-### Aujourd'hui
-Les délais sont **codés en dur** dans `shared/constants.ts` (`TIER_LIMITS.rateLimitMs`) :
-
-| Type de compte | Délai actuel |
-|---|---|
-| Invité | 10 s |
-| Inscrit | 1 s |
-| Premium | 0,5 s |
-
-Pour les changer, il faut modifier le code et redémarrer le serveur.
-
-### Objectif
-Pouvoir les régler depuis **Panel Admin → Paramètres**, comme la compression d'images, sans redémarrage.
-
-### Pistes d'implémentation
-- Stocker les 3 valeurs dans la table `app_settings` (ex. `rate_limit_guest_ms`, `rate_limit_registered_ms`,
-  `rate_limit_premium_ms`), avec `shared/constants.ts` comme valeurs par défaut.
-- Lire ces valeurs dans `checkRateLimit` (middleware rate limit) avec un petit cache mémoire (ex. 30 s)
-  pour ne pas interroger la base à chaque message.
-- Route admin protégée (superadmin + TOTP) pour les modifier, avec **bornes de sécurité** côté serveur
-  (ex. minimum 200 ms, maximum 60 s) pour éviter une erreur de saisie qui ouvrirait la porte au spam.
-- Journaliser chaque modification (qui, quand, ancienne → nouvelle valeur).
-- Le message d'erreur côté client (« Veuillez attendre X s ») doit afficher la valeur réelle renvoyée par le serveur.
+Panel → Paramètres → **Rythme d'envoi des messages**, par type de compte : délai minimum entre deux messages
+(0,2 s → 10 min, curseur + valeur libre) et nombre maximum de messages par minute dans un même salon (1 → 60).
+Bornes contrôlées par le serveur, chaque changement est tracé dans le journal (ancienne → nouvelle valeur).
+Le délai est désormais respecté à la milliseconde près (avant : 0,5 s était arrondi à 1 s).
 
 ---
 
-## 3. Images, GIF et fichiers dans les messages privés
+## 3. Images, GIF et fichiers dans les messages privés — ✅ fait (Lot 4.3, 17/11/2026)
 
-### Aujourd'hui
-L'envoi de médias ne fonctionne que dans les salons. L'événement `dm:send` du serveur
-(`server/src/websocket/conversation.handler.ts`) n'accepte que du texte.
-En message privé, le bouton média affiche désormais un message clair (« pas encore disponible »)
-au lieu de planter.
-
-### Pistes d'implémentation
-- Faire passer `type`, `file_url` et `gif_url` dans `dm:send`, avec **les mêmes contrôles** que
-  `message:send` (`message.service.ts` : URL d'upload locale uniquement, image interdite aux invités,
-  fichier réservé au premium, GIF en https).
-- Ajouter `sendMediaMessage` au hook `useDMChat`.
+`dm:send` accepte `type`, `file_url` et `gif_url` avec **les mêmes contrôles** que dans les salons
+(`message.service.ts`). Liste des conversations et notifications : « 📷 Image », « 🎞️ GIF », « 📎 Fichier ».
 
 ---
 
@@ -102,9 +74,9 @@ uniquement le jour où on en a vraiment l'usage.
 
 | Paquet | À quoi il sert | Quand le réinstaller |
 |---|---|---|
-| `passport-github2` | **Connexion avec un compte GitHub** (comme Google) | ⭐ Amélioration sympa : bouton « Se connecter avec GitHub ». Prévoir la même logique que Google (cookies, vérification de l'email, liaison de compte sûre). |
+| `passport-github2` | **Connexion avec un compte GitHub** (comme Google) | ✅ Réinstallé au Lot 4.3 : bouton « Continuer avec GitHub » (affiché seulement si les clés sont dans le `.env`). |
 | `zod` (v4) | Vérifier la forme des données reçues par l'API (schémas) | Si on veut généraliser une validation stricte et uniforme de toutes les routes, à la place des contrôles faits à la main. |
-| `node-cron` | Tâches planifiées (« chaque nuit à 3 h ») | Pour la purge LCEN des messages > 1 an, le nettoyage des fichiers orphelins, des sessions expirées… |
+| `node-cron` | Tâches planifiées (« chaque nuit à 3 h ») | Pas nécessaire pour l'instant : la purge LCEN (Lot 4.3) tourne au démarrage puis toutes les 24 h avec un simple minuteur. À reprendre si on veut une heure précise. |
 | `uuid` | Générer des identifiants uniques | **Probablement jamais** : Node.js le fait nativement avec `crypto.randomUUID()`. |
 
 ---

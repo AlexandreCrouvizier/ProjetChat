@@ -29,6 +29,10 @@ import { reportRepository } from '../repositories/report.repository';
 import { messageRepository } from '../repositories/message.repository';
 import { guestSecurityService } from '../services/guestSecurity.service';
 import { db } from '../config/database';
+import { validateSettingUpdate, invalidateAppSettings } from '../services/settings.service';
+import { logAudit } from '../middleware/audit.middleware';
+import { lcenService } from '../services/lcen.service';
+import { getIpFromRequest } from '../utils/ip';
 
 // ══════════════════════════════════
 // Auth TOTP (pas besoin d'admin_token)
@@ -81,6 +85,18 @@ adminRouter.get('/stats', async (_req, res) => {
     });
   } catch (error: any) {
     console.error('❌ admin stats:', error);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/** POST /api/admin/lcen/purge — Purge immédiate des traces au-delà de la durée de conservation */
+adminRouter.post('/lcen/purge', async (req, res) => {
+  try {
+    const result = await lcenService.purge();
+    await logAudit('admin_lcen_purge', getIpFromRequest(req), req.user?.userId, { total: result.total }, req.headers['user-agent']);
+    res.json({ success: true, result });
+  } catch (error: any) {
+    console.error('❌ admin lcen purge:', error?.message || error);
     res.status(500).json({ error: 'INTERNAL_ERROR' });
   }
 });
@@ -517,22 +533,38 @@ adminRouter.patch('/settings', async (req, res) => {
       return res.status(400).json({ error: 'Aucune valeur fournie' });
     }
 
-    // 🔐 Valeurs contrôlées pour les réglages à choix fermé
-    if ('upload_metadata_mode' in updates && !['strip', 'keep', 'option'].includes(String(updates.upload_metadata_mode))) {
-      return res.status(400).json({ error: 'Valeur invalide pour upload_metadata_mode (strip | keep | option)' });
+    // 🔐 Valeurs contrôlées (choix fermés, bornes numériques) : tout est refusé si une seule est invalide
+    const normalized: Record<string, string> = {};
+    for (const [key, value] of Object.entries(updates)) {
+      const check = validateSettingUpdate(key, value);
+      if (!check.ok) return res.status(400).json({ error: check.error });
+      normalized[key] = check.value;
     }
 
-    for (const [key, value] of Object.entries(updates)) {
+    const before = await db('app_settings').whereIn('key', Object.keys(normalized)).select('key', 'value');
+    const previous: Record<string, string> = {};
+    for (const r of before) previous[r.key] = r.value;
+
+    const changes: Record<string, { from: string; to: string }> = {};
+    for (const [key, value] of Object.entries(normalized)) {
+      if (!(key in previous)) continue; // clé inconnue : ignorée (aucune création depuis le panel)
       await db('app_settings')
         .where({ key })
-        .update({ value: String(value), updated_at: db.fn.now() });
+        .update({ value, updated_at: db.fn.now() });
+      if (previous[key] !== value) changes[key] = { from: previous[key], to: value };
     }
 
-    // Invalider le cache de upload.routes
+    // Invalider les caches (compression d'images + réglages par type de compte)
+    invalidateAppSettings();
     try {
       const { invalidateSettingsCache } = await import('./upload.routes');
       invalidateSettingsCache();
     } catch { /* import dynamique optionnel */ }
+
+    // Traçabilité : qui a changé quoi, quand (ancienne → nouvelle valeur)
+    if (Object.keys(changes).length > 0) {
+      await logAudit('admin_settings', getIpFromRequest(req), req.user?.userId, { changes }, req.headers['user-agent']);
+    }
 
     res.json({ success: true, updated: Object.keys(updates) });
   } catch (error: any) {

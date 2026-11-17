@@ -1,11 +1,11 @@
 /**
- * controllers/oauth.controller.ts — Gère le callback OAuth Google
+ * controllers/oauth.controller.ts — Gère le callback OAuth (Google, GitHub)
  * 
  * Flow :
- *   1. L'utilisateur clique "Connexion Google" sur le frontend
- *   2. Le frontend redirige vers /api/auth/oauth/google
- *   3. Le serveur redirige vers la page de consentement Google
- *   4. Google redirige vers /api/auth/oauth/google/callback avec le profil
+ *   1. L'utilisateur clique "Continuer avec Google / GitHub" sur le frontend
+ *   2. Le frontend redirige vers /api/auth/oauth/<fournisseur>
+ *   3. Le serveur redirige vers la page de consentement du fournisseur (avec un « state » en cookie)
+ *   4. Le fournisseur redirige vers /api/auth/oauth/<fournisseur>/callback avec le code
  *   5. Ce controller crée/retrouve le compte, pose les cookies de session (httpOnly)
  *      et redirige vers le frontend — 🔐 plus aucun jeton dans l'URL (historique, logs, en-tête Referer)
  */
@@ -21,17 +21,18 @@ import { env } from '../config/env';
 import { isBanActive } from '../services/accessRevocation.service';
 import { setSessionCookies } from '../utils/authCookies';
 import { uploadService } from '../services/upload.service';
+import type { OAuthProfile } from '../config/passport';
 
 export const oauthController = {
 
   /**
-   * Callback après authentification Google
-   * Passport a déjà vérifié le token Google et extrait le profil (dans req.user)
+   * Callback après authentification Google ou GitHub
+   * Passport a déjà vérifié le code du fournisseur et le « state », et normalisé le profil (req.user)
    */
-  async googleCallback(req: Request, res: Response): Promise<void> {
+  async callback(req: Request, res: Response): Promise<void> {
     try {
-      const profile = req.user as any;
-      if (!profile) {
+      const profile = req.user as unknown as OAuthProfile | undefined;
+      if (!profile || (profile.provider !== 'google' && profile.provider !== 'github')) {
         res.redirect(`${env.APP_URL}/auth_group/login?error=oauth_failed`);
         return;
       }
@@ -39,8 +40,8 @@ export const oauthController = {
       const ip = getIpFromRequest(req);
       const userAgent = req.headers['user-agent'];
 
-      // 1. Chercher si un compte existe déjà avec ce Google ID
-      let user = await userRepository.findByOAuth('google', profile.providerId);
+      // 1. Chercher si un compte existe déjà avec cet identifiant chez ce fournisseur
+      let user = await userRepository.findByOAuth(profile.provider, profile.providerId);
       let isNewUser = false;
 
       if (!user) {
@@ -49,8 +50,8 @@ export const oauthController = {
           user = await userRepository.findByEmail(profile.email);
         }
 
-        // 🔐 Lier un compte Google à un compte existant UNIQUEMENT si Google a vérifié l'email.
-        // Sinon, n'importe qui pourrait créer un compte Google avec l'adresse d'une victime
+        // 🔐 Lier un compte Google/GitHub à un compte existant UNIQUEMENT si le fournisseur a vérifié l'email.
+        // Sinon, n'importe qui pourrait créer un compte chez le fournisseur avec l'adresse d'une victime
         // (non vérifiée) et prendre le contrôle de son compte ChatApp.
         if (user && !profile.emailVerified) {
           res.redirect(`${env.APP_URL}/auth_group/login?error=oauth_email_unverified`);
@@ -58,11 +59,15 @@ export const oauthController = {
         }
 
         if (user) {
-          // Compte existant (inscrit par email) → lier le Google ID
-          await userRepository.update(user.id, {
-            oauth_provider: 'google',
-            oauth_id: profile.providerId,
-          } as any);
+          // Compte existant (inscrit par email) → lier ce fournisseur s'il n'en a pas encore.
+          // (Un seul fournisseur mémorisé par compte : s'il est déjà lié à l'autre, la connexion
+          // passe par l'adresse e-mail vérifiée, sans écraser le lien existant.)
+          if (!user.oauth_provider) {
+            await userRepository.update(user.id, {
+              oauth_provider: profile.provider,
+              oauth_id: profile.providerId,
+            } as any);
+          }
         } else {
           // 3. Nouveau compte → créer
           // Générer un username unique basé sur le displayName
@@ -70,15 +75,18 @@ export const oauthController = {
             .replace(/[^a-zA-Z0-9_-]/g, '')
             .substring(0, 25);
 
+          // Pseudo trop court (nom sans lettres latines, par exemple) → pseudo générique
+          if (username.length < 3) username = `membre_${crypto.randomInt(1000, 10000)}`;
           // Vérifier l'unicité
-          if (await userRepository.isUsernameTaken(username)) {
-            username = username + '_' + Math.floor(Math.random() * 1000);
+          const base = username.substring(0, 24);
+          for (let i = 0; i < 5 && await userRepository.isUsernameTaken(username); i++) {
+            username = `${base}_${crypto.randomInt(100, 100000)}`;
           }
 
           user = await userRepository.create({
             username,
-            email: profile.email,
-            oauth_provider: 'google',
+            email: profile.email ?? undefined,
+            oauth_provider: profile.provider,
             oauth_id: profile.providerId,
             tier: 'registered',
             last_ip: ip,
@@ -96,14 +104,14 @@ export const oauthController = {
         return;
       }
 
-      // 🔐 Un compte banni ne peut pas se reconnecter via Google
+      // 🔐 Un compte banni ne peut pas se reconnecter via Google/GitHub
       if (isBanActive(user)) {
         res.redirect(`${env.APP_URL}/auth_group/login?error=account_suspended`);
         return;
       }
 
-      // 🔐 Pas encore d'avatar : la photo Google est copiée chez nous (jamais d'URL externe en avatar,
-      // les visiteurs ne chargent rien depuis Google). Non bloquant en cas d'échec.
+      // 🔐 Pas encore d'avatar : la photo du fournisseur est copiée chez nous (jamais d'URL externe en
+      // avatar, les visiteurs ne chargent rien chez Google/GitHub). Non bloquant en cas d'échec.
       if (!user.avatar_url && profile.avatar) {
         await uploadService.importRemoteAvatar(profile.avatar, { id: user.id, username: user.username }, ip);
       }
@@ -130,7 +138,7 @@ export const oauthController = {
       } as any);
 
       // 7. Log LCEN
-      await logAudit('login', ip, user.id, { method: 'oauth_google', is_new: isNewUser }, userAgent);
+      await logAudit('login', ip, user.id, { method: `oauth_${profile.provider}`, is_new: isNewUser }, userAgent);
 
       // 8. Session en cookies httpOnly, puis retour au frontend (sans aucun jeton dans l'URL)
       setSessionCookies(res, { access_token: accessToken, refresh_token: refreshToken });

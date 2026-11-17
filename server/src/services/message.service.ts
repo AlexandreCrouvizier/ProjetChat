@@ -18,6 +18,7 @@ import { linkPreviewService } from './linkPreview.service';
 import { gifService } from './gif.service';
 import { uploadService } from './upload.service';
 import { checkRateLimit } from '../middleware/rateLimit.middleware';
+import { historyService } from './history.service';
 import { logAudit } from '../middleware/audit.middleware';
 import { BadRequestError, ForbiddenError, RateLimitError } from '../utils/errors';
 import { VALIDATION, TIER_LIMITS } from '../../../shared/constants';
@@ -132,11 +133,12 @@ export const messageService = {
     if (messageType === 'file'  && !data.fileUrl) throw new BadRequestError('URL fichier manquante');
     if (messageType === 'gif'   && !data.gifUrl)  throw new BadRequestError('URL GIF manquante');
 
-    const allowed = await checkRateLimit(data.authorId, data.tier);
-    if (!allowed) {
-      const tierConfig = TIER_LIMITS[data.tier as keyof typeof TIER_LIMITS];
-      const seconds = Math.ceil((tierConfig?.rateLimitMs || 10000) / 1000);
-      throw new RateLimitError(`Veuillez attendre ${seconds}s entre chaque message`);
+    const rate = await checkRateLimit(data.authorId, data.tier);
+    if (!rate.allowed) {
+      const delay = rate.delayMs < 1000
+        ? `${(rate.delayMs / 1000).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} s`
+        : `${Math.ceil(rate.delayMs / 1000)} s`;
+      throw new RateLimitError(`Veuillez attendre ${delay} entre chaque message`);
     }
 
     if (data.groupId) {
@@ -188,6 +190,7 @@ export const messageService = {
       content: data.content,
       userId: data.authorId,
       groupId: data.groupId || data.conversationId || 'dm',
+      tier: data.tier,
     });
     if (!modResult.allowed) {
       throw new BadRequestError(modResult.reason || 'Message bloqué');
@@ -205,6 +208,16 @@ export const messageService = {
     if (data.parentMessageId) {
       const parent = await messageRepository.findById(data.parentMessageId);
       if (!parent || !sameScope(parent)) throw new BadRequestError('Message parent introuvable');
+    }
+    // 🔐 Historique limité : on ne peut ni citer ni répondre en fil à un message qu'on ne peut pas lire
+    // (sinon la citation renverrait son contenu à tout le salon, auteur compris)
+    if (data.groupId && (data.replyToId || data.parentMessageId)) {
+      const targets = [data.replyToId, data.parentMessageId].filter((id): id is string => !!id);
+      const window = await historyService.windowFor(data.groupId, { userId: data.authorId, tier: data.tier });
+      const visible = await historyService.visibleIds(targets, window);
+      if (targets.some((id) => !visible.has(id))) {
+        throw new BadRequestError('Ce message est antérieur à votre arrivée dans le salon.');
+      }
     }
 
     const message = await messageRepository.create({
@@ -272,29 +285,52 @@ export const messageService = {
     limit?: number;
     before?: string;
     currentUserId?: string;
+    currentUserTier?: string;
   }) {
-    const messages = await messageRepository.findByGroup({
+    const limit = Math.min(Math.max(params.limit || 50, 1), 100);
+    // 🔐 Historique visible selon le type de compte (réglage admin)
+    const window = await historyService.windowFor(
+      params.groupId,
+      params.currentUserId ? { userId: params.currentUserId, tier: params.currentUserTier || 'guest' } : null,
+    );
+    // Un message de plus que demandé : sert à savoir s'il reste des messages plus anciens VISIBLES
+    const rows = await messageRepository.findByGroup({
       groupId: params.groupId,
-      limit: params.limit || 50,
+      limit: limit + 1,
       before: params.before,
+      restrict: (q) => historyService.apply(q, window),
     });
+    const hasMore = rows.length > limit;
+    const messages = hasMore ? rows.slice(1) : rows;
 
     const messageIds = messages.map(m => m.id);
-    const [allReactions, threadCounts, replyToData] = await Promise.all([
+    const replyIds = messages.filter(m => m.reply_to_id).map(m => m.reply_to_id!);
+    const [allReactions, threadCounts, replyToData, visibleReplies] = await Promise.all([
       reactionRepository.getForMessages(messageIds),
       messageRepository.getThreadCounts(messageIds),
-      messageRepository.getReplyToData(messages.filter(m => m.reply_to_id).map(m => m.reply_to_id!)),
+      messageRepository.getReplyToData(replyIds),
+      historyService.visibleIds(replyIds, window),
     ]);
 
-    return messages.map(msg => formatMessage(msg, {
+    const formatted = messages.map(msg => formatMessage(msg, {
       reactions: (allReactions[msg.id] || []).map(r => ({
         emoji: r.emoji, count: r.count,
         reacted: params.currentUserId ? r.users.includes(params.currentUserId) : false,
       })),
-      replyTo: msg.reply_to_id ? (replyToData[msg.reply_to_id] || null) : null,
+      replyTo: msg.reply_to_id
+        ? (visibleReplies.has(msg.reply_to_id)
+          ? (replyToData[msg.reply_to_id] || null)
+          // Citation d'un message hors de l'historique visible : contenu masqué
+          : { id: msg.reply_to_id, author_username: '', content: 'Message antérieur non disponible', unavailable: true })
+        : null,
       threadCount: threadCounts[msg.id]?.count || 0,
       threadLastReplyAt: threadCounts[msg.id]?.lastReplyAt || null,
     }));
+    return {
+      messages: formatted,
+      hasMore,
+      history: { limited: window.limited, rule: window.rule, limit: window.limit },
+    };
   },
 
   async getConversationMessages(params: {
@@ -324,7 +360,18 @@ export const messageService = {
     }));
   },
 
-  async getThreadMessages(parentMessageId: string, currentUserId?: string) {
+  async getThreadMessages(parentMessageId: string, currentUserId?: string, currentUserTier?: string) {
+    // 🔐 Le fil d'un message hors de l'historique visible n'est pas accessible
+    const parent = await messageRepository.findById(parentMessageId);
+    if (parent?.group_id) {
+      const window = await historyService.windowFor(
+        parent.group_id,
+        currentUserId ? { userId: currentUserId, tier: currentUserTier || 'guest' } : null,
+      );
+      if (!(await historyService.visibleIds([parentMessageId], window)).has(parentMessageId)) {
+        throw new ForbiddenError('Ce message est antérieur à votre arrivée dans le salon.');
+      }
+    }
     const messages = await messageRepository.findThreadMessages(parentMessageId);
     const messageIds = messages.map(m => m.id);
     const allReactions = await reactionRepository.getForMessages(messageIds);

@@ -74,6 +74,10 @@ export interface SendDMPayload {
   conversation_id: string;
   content: string;
   reply_to_id?: string;
+  /** Médias en message privé (mêmes contrôles serveur que dans les salons) */
+  type?: 'text' | 'image' | 'gif' | 'file';
+  file_url?: string;
+  gif_url?: string;
 }
 
 export interface MessageCallback {

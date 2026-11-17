@@ -56,6 +56,13 @@ async function run() {
 }
 
 run().catch((err) => {
-  console.error('❌ Erreur :', err.message);
+  // Une connexion refusée (base éteinte) arrive sans message : on affiche le code et les détails
+  const inner: any[] = Array.isArray(err?.errors) ? err.errors : [];
+  const code = err?.code || inner.find((e) => e?.code)?.code;
+  const detail = err?.message || inner.map((e) => e?.message).filter(Boolean).join(' | ') || String(err);
+  console.error('❌ Erreur :', detail, code ? `(${code})` : '');
+  if (code === 'ECONNREFUSED') {
+    console.error('   → PostgreSQL ne répond pas. Lancer Docker Desktop puis, à la racine du projet : docker compose up -d');
+  }
   process.exit(1);
 });

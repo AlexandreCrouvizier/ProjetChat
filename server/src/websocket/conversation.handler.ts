@@ -24,14 +24,19 @@ export function registerConversationHandlers(io: SocketIOServer, socket: Authent
     conversation_id: string;
     content: string;
     reply_to_id?: string;
+    // ⭐ Médias en message privé : mêmes contrôles que dans les salons (message.service)
+    type?: string;
+    file_url?: string;
+    gif_url?: string;
   }, callback?: (res: any) => void) => {
     try {
       const isParticipant = await conversationRepository.isParticipant(data.conversation_id, userId);
       if (!isParticipant) { callback?.({ success: false, error: 'Non participant' }); return; }
 
       const message = await messageService.sendMessage({
-        content: data.content, authorId: userId,
+        content: typeof data.content === 'string' ? data.content : '', authorId: userId,
         conversationId: data.conversation_id, tier, replyToId: data.reply_to_id, ip,
+        type: data.type || 'text', fileUrl: data.file_url, gifUrl: data.gif_url,
       });
 
       await conversationRepository.updateLastMessage(data.conversation_id);
@@ -57,7 +62,7 @@ export function registerConversationHandlers(io: SocketIOServer, socket: Authent
 
         io.to(`user:${other.id}`).emit('notification:new', {
           type: 'dm', title: `${username}`,
-          content: data.content.substring(0, 100),
+          content: dmNotificationText(message),
           reference_type: 'conversation', reference_id: data.conversation_id,
           created_at: new Date().toISOString(),
         });
@@ -84,6 +89,16 @@ export function registerConversationHandlers(io: SocketIOServer, socket: Authent
       }
     } catch (error: any) { console.error(`⚠️ conversation:read erreur:`, error.message); }
   });
+}
+
+/** Aperçu de la notification de message privé (texte, ou type de média) */
+function dmNotificationText(message: { type?: string; content?: string }): string {
+  const text = (message.content || '').substring(0, 100);
+  if (text) return text;
+  if (message.type === 'image') return '📷 Image';
+  if (message.type === 'gif') return '🎞️ GIF';
+  if (message.type === 'file') return '📎 Fichier';
+  return '';
 }
 
 /** 🔐 Seules nos erreurs métier (AppError) sont montrées au client ; le reste reste dans les logs serveur */

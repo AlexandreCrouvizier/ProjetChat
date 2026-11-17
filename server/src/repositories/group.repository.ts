@@ -147,6 +147,8 @@ export const groupRepository = {
     if (!exists) {
       await db('group_members').insert({ group_id: groupId, user_id: userId, role });
     }
+    // Première arrivée dans le salon (jamais remise à zéro : historique visible, voir history.service)
+    await db.raw('INSERT INTO group_arrivals (group_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING', [groupId, userId]);
   },
 
   async removeMember(groupId: string, userId: string): Promise<void> {
