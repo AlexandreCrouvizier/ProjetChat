@@ -38,7 +38,7 @@ export function registerReactionHandlers(io: SocketIOServer, socket: Authenticat
       // 1. Vérifier les permissions par tier
       if (tier === 'guest') {
         const tierConfig = TIER_LIMITS.guest;
-        if (!tierConfig.allowedReactions.includes(emoji)) {
+        if (!(tierConfig.allowedReactions as readonly string[]).includes(emoji)) {
           callback?.({
             success: false,
             error: `Les invités ne peuvent utiliser que ${GUEST_EMOJIS.join(' et ')}`,

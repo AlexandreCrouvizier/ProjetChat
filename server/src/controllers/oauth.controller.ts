@@ -6,7 +6,8 @@
  *   2. Le frontend redirige vers /api/auth/oauth/google
  *   3. Le serveur redirige vers la page de consentement Google
  *   4. Google redirige vers /api/auth/oauth/google/callback avec le profil
- *   5. Ce controller crée/retrouve le compte et redirige vers le frontend avec le token
+ *   5. Ce controller crée/retrouve le compte, pose les cookies de session (httpOnly)
+ *      et redirige vers le frontend — 🔐 plus aucun jeton dans l'URL (historique, logs, en-tête Referer)
  */
 
 import type { Request, Response } from 'express';
@@ -17,6 +18,8 @@ import { logAudit } from '../middleware/audit.middleware';
 import { getIpFromRequest } from '../utils/ip';
 import crypto from 'crypto';
 import { env } from '../config/env';
+import { isBanActive } from '../services/accessRevocation.service';
+import { setSessionCookies } from '../utils/authCookies';
 
 export const oauthController = {
 
@@ -43,6 +46,14 @@ export const oauthController = {
         // 2. Chercher par email (peut-être inscrit par email avant)
         if (profile.email) {
           user = await userRepository.findByEmail(profile.email);
+        }
+
+        // 🔐 Lier un compte Google à un compte existant UNIQUEMENT si Google a vérifié l'email.
+        // Sinon, n'importe qui pourrait créer un compte Google avec l'adresse d'une victime
+        // (non vérifiée) et prendre le contrôle de son compte ChatApp.
+        if (user && !profile.emailVerified) {
+          res.redirect(`${env.APP_URL}/auth_group/login?error=oauth_email_unverified`);
+          return;
         }
 
         if (user) {
@@ -89,6 +100,12 @@ export const oauthController = {
         return;
       }
 
+      // 🔐 Un compte banni ne peut pas se reconnecter via Google
+      if (isBanActive(user)) {
+        res.redirect(`${env.APP_URL}/auth_group/login?error=account_suspended`);
+        return;
+      }
+
       // 4. Générer les tokens JWT
       const payload = { userId: user.id, username: user.username, tier: user.tier };
       const accessToken = generateAccessToken(payload);
@@ -113,15 +130,9 @@ export const oauthController = {
       // 7. Log LCEN
       await logAudit('login', ip, user.id, { method: 'oauth_google', is_new: isNewUser }, userAgent);
 
-      // 8. Rediriger vers le frontend avec les tokens en query params
-      // Le frontend les récupérera et les stockera dans localStorage
-      const redirectUrl = `${env.APP_URL}/auth_group/login?` + new URLSearchParams({
-        access_token: accessToken,
-        refresh_token: refreshToken,
-        oauth_success: 'true',
-      }).toString();
-
-      res.redirect(redirectUrl);
+      // 8. Session en cookies httpOnly, puis retour au frontend (sans aucun jeton dans l'URL)
+      setSessionCookies(res, { access_token: accessToken, refresh_token: refreshToken });
+      res.redirect(`${env.APP_URL}/auth_group/login?oauth_success=1`);
 
     } catch (error: any) {
       console.error('❌ OAuth callback error:', error);

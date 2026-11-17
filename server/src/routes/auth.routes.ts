@@ -5,10 +5,11 @@
 import { Router } from 'express';
 import { authController } from '../controllers/auth.controller';
 import { oauthController } from '../controllers/oauth.controller';
-import { requireAuth } from '../middleware/auth.middleware';
+import { requireAuth, optionalAuth } from '../middleware/auth.middleware';
 import { audit } from '../middleware/audit.middleware';
 import { rateLimit } from '../middleware/rateLimit.middleware';
 import passport from '../config/passport';
+import { env } from '../config/env';
 
 const router = Router();
 
@@ -18,7 +19,7 @@ router.post('/register', rateLimit({ name: 'register', max: 10, windowSeconds: 3
 router.post('/login',    rateLimit({ name: 'login',    max: 20, windowSeconds: 900 }),  audit('login'),    authController.login);
 router.post('/guest',    rateLimit({ name: 'guest',    max: 30, windowSeconds: 900 }) , audit('guest'),    authController.guest);
 router.post('/refresh',  rateLimit({ name: 'refresh',  max: 60, windowSeconds: 900 }),                     authController.refresh);
-router.post('/logout',   requireAuth,       authController.logout);
+router.post('/logout',   optionalAuth,      authController.logout);  // fonctionne même si le jeton d'accès a expiré
 router.get('/me',        requireAuth,       authController.me);
 
 // ===== OAuth Google =====
@@ -29,7 +30,7 @@ router.get('/oauth/google',
 
 // Étape 2 : Google redirige ici après consentement
 router.get('/oauth/google/callback',
-  passport.authenticate('google', { session: false, failureRedirect: '/auth_group/login?error=oauth_failed' }),
+  passport.authenticate('google', { session: false, failureRedirect: `${env.APP_URL}/auth_group/login?error=oauth_failed` }),
   oauthController.googleCallback
 );
 

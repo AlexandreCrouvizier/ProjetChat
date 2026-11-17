@@ -92,3 +92,17 @@ au lieu de planter.
   `message:send` (`message.service.ts` : URL d'upload locale uniquement, image interdite aux invités,
   fichier réservé au premium, GIF en https).
 - Ajouter `sendMediaMessage` au hook `useDMChat`.
+
+---
+
+## 4. Paquets retirés au Lot 2, à réinstaller si besoin
+
+Supprimés car inutilisés (moins de code tiers = moins de failles possibles). À réinstaller **en dernière version**
+uniquement le jour où on en a vraiment l'usage.
+
+| Paquet | À quoi il sert | Quand le réinstaller |
+|---|---|---|
+| `passport-github2` | **Connexion avec un compte GitHub** (comme Google) | ⭐ Amélioration sympa : bouton « Se connecter avec GitHub ». Prévoir la même logique que Google (cookies, vérification de l'email, liaison de compte sûre). |
+| `zod` (v4) | Vérifier la forme des données reçues par l'API (schémas) | Si on veut généraliser une validation stricte et uniforme de toutes les routes, à la place des contrôles faits à la main. |
+| `node-cron` | Tâches planifiées (« chaque nuit à 3 h ») | Pour la purge LCEN des messages > 1 an, le nettoyage des fichiers orphelins, des sessions expirées… |
+| `uuid` | Générer des identifiants uniques | **Probablement jamais** : Node.js le fait nativement avec `crypto.randomUUID()`. |

@@ -33,13 +33,8 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   setUser: (user) => set({ user, isAuthenticated: true, isLoading: false }),
 
-  logout: () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('access_token');
-      localStorage.removeItem('refresh_token');
-    }
-    set({ user: null, isAuthenticated: false, isLoading: false });
-  },
+  // Vide l'état local. Les cookies httpOnly sont effacés par le serveur (POST /api/auth/logout).
+  logout: () => set({ user: null, isAuthenticated: false, isLoading: false }),
 
   setLoading: (isLoading) => set({ isLoading }),
 }));

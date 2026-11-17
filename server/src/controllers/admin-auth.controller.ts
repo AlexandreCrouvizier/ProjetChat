@@ -9,6 +9,7 @@
 import type { Request, Response } from 'express';
 import { totpService } from '../services/totp.service';
 import { generateAdminToken } from '../middleware/superadmin.middleware';
+import { setAdminCookie, clearAdminCookie } from '../utils/authCookies';
 import { db } from '../config/database';
 
 export const adminAuthController = {
@@ -88,14 +89,23 @@ export const adminAuthController = {
       // Générer le token admin (30 min)
       const adminToken = generateAdminToken(userId);
 
+      // 🔐 Jeton admin en cookie httpOnly (chemin /api), jamais exposé au JavaScript
+      setAdminCookie(res, adminToken);
       res.json({
-        admin_token: adminToken,
-        expires_in: 1800, // 30 min en secondes
+        expires_in: 1800, // 30 min en secondes (sert seulement au compte à rebours affiché)
         message: 'Authentification admin réussie',
       });
     } catch (error: any) {
       console.error('❌ admin verify:', error);
       res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Erreur serveur' });
     }
+  },
+  /**
+   * POST /api/admin-auth/logout
+   * Ferme la session du panel (efface le cookie admin). La session du chat reste ouverte.
+   */
+  async logout(_req: Request, res: Response): Promise<void> {
+    clearAdminCookie(res);
+    res.json({ message: 'Session admin fermée' });
   },
 };

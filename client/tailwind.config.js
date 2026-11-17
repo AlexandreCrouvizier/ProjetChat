@@ -8,7 +8,7 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Sora', 'sans-serif'],
+        sans: ['Sora Variable', 'Sora', 'sans-serif'],
         mono: ['JetBrains Mono', 'monospace'],
       },
       colors: {

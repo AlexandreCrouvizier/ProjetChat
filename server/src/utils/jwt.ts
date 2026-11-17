@@ -11,6 +11,7 @@
  */
 
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { env } from '../config/env';
 
 // Ce qui est encodé dans le JWT (le "payload")
@@ -25,7 +26,9 @@ export interface JwtPayload {
  */
 export function generateAccessToken(payload: JwtPayload): string {
   return jwt.sign(payload, env.JWT_ACCESS_SECRET, {
-    expiresIn: env.JWT_ACCESS_EXPIRES_IN,  // 15m par défaut
+    algorithm: 'HS256',
+    jwtid: crypto.randomUUID(),  // identifiant unique : deux jetons ne sont jamais identiques
+    expiresIn: env.JWT_ACCESS_EXPIRES_IN as jwt.SignOptions['expiresIn'],  // 15m par défaut
   });
 }
 
@@ -34,7 +37,11 @@ export function generateAccessToken(payload: JwtPayload): string {
  */
 export function generateRefreshToken(payload: JwtPayload): string {
   return jwt.sign(payload, env.JWT_REFRESH_SECRET, {
-    expiresIn: env.JWT_REFRESH_EXPIRES_IN,  // 7d par défaut
+    algorithm: 'HS256',
+    // 🔐 Identifiant unique : sans lui, deux jetons émis dans la même seconde étaient identiques
+    // (même contenu, même date) → la rotation du jeton de renouvellement ne changeait rien.
+    jwtid: crypto.randomUUID(),
+    expiresIn: env.JWT_REFRESH_EXPIRES_IN as jwt.SignOptions['expiresIn'],  // 7d par défaut
   });
 }
 

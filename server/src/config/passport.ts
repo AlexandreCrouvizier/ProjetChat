@@ -38,13 +38,22 @@ if (env.isDev && (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SE
     async (_accessToken, _refreshToken, profile, done) => {
       try {
         // On passe le profil Google au controller qui gèrera la création/connexion
-        done(null, {
+        // 🔐 email_verified : Google indique si l'adresse a été vérifiée. Sans cette preuve,
+        // on ne lie JAMAIS le compte Google à un compte ChatApp existant (prise de contrôle).
+        const emailEntry = profile.emails?.[0] as { value: string; verified?: boolean | string } | undefined;
+        const rawJson = (profile as unknown as { _json?: { email_verified?: boolean | string } })._json;
+        const emailVerified = emailEntry?.verified === true || emailEntry?.verified === 'true'
+          || rawJson?.email_verified === true || rawJson?.email_verified === 'true';
+        const oauthProfile = {
           provider: 'google',
           providerId: profile.id,
-          email: profile.emails?.[0]?.value || null,
+          email: emailEntry?.value || null,
+          emailVerified,
           displayName: profile.displayName || 'User',
           avatar: profile.photos?.[0]?.value || null,
-        });
+        };
+        // req.user contient ici le profil Google (pas un JWT) : lu par oauth.controller
+        done(null, oauthProfile as unknown as Express.User);
       } catch (error) {
         done(error as Error);
       }

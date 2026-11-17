@@ -7,7 +7,7 @@
  *   2. L'erreur "Node.removeChild" de mismatch d'hydratation
  */
 
-export function ThemeInitScript() {
+export function ThemeInitScript({ nonce }: { nonce?: string }) {
   // Ce script est rendu côté serveur et exécuté avant React
   const script = `
     (function() {
@@ -20,5 +20,6 @@ export function ThemeInitScript() {
     })();
   `;
 
-  return <script dangerouslySetInnerHTML={{ __html: script }} />;
+  // 🔐 nonce : autorisé par la CSP (un script inline sans nonce serait bloqué)
+  return <script nonce={nonce} dangerouslySetInnerHTML={{ __html: script }} />;
 }

@@ -2,7 +2,8 @@
  * hooks/useAuth.ts — Hook d'authentification
  * 
  * Gère : login, register, guest, logout, vérification du token au chargement.
- * Stocke les tokens dans localStorage et l'utilisateur dans Zustand.
+ * 🔐 Les jetons sont dans des cookies httpOnly posés par le serveur : ce hook ne les voit jamais.
+ * Il ne garde que l'utilisateur (Zustand).
  */
 
 'use client';
@@ -21,10 +22,8 @@ export function useAuth() {
   /** Inscription par email */
   const register = useCallback(async (username: string, email: string, password: string) => {
     const { data } = await api.post('/auth/register', { username, email, password });
-    localStorage.setItem('access_token', data.access_token);
-    if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
     setUser(data.user);
-    connectSocket(data.access_token);
+    connectSocket();
     router.push('/chat_group');
     return data;
   }, [setUser, router]);
@@ -32,10 +31,8 @@ export function useAuth() {
   /** Connexion par email */
   const login = useCallback(async (email: string, password: string) => {
     const { data } = await api.post('/auth/login', { email, password });
-    localStorage.setItem('access_token', data.access_token);
-    if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
     setUser(data.user);
-    connectSocket(data.access_token);
+    connectSocket();
     router.push('/chat_group');
     return data;
   }, [setUser, router]);
@@ -44,9 +41,8 @@ export function useAuth() {
   const loginAsGuest = useCallback(async (username?: string) => {
     const fingerprint = getOrCreateFingerprint();
     const { data } = await api.post('/auth/guest', { username, fingerprint });
-    localStorage.setItem('access_token', data.access_token);
     setUser(data.user);
-    connectSocket(data.access_token);
+    connectSocket();
     router.push('/chat_group');
     return data;
   }, [setUser, router]);
@@ -54,8 +50,8 @@ export function useAuth() {
   /** Déconnexion */
   const logout = useCallback(async () => {
     try {
-      const refreshToken = localStorage.getItem('refresh_token');
-      await api.post('/auth/logout', { refresh_token: refreshToken });
+      // Le serveur supprime la session et efface les cookies
+      await api.post('/auth/logout');
     } catch {
       // Ignore les erreurs de logout
     }
@@ -74,18 +70,13 @@ export function useAuth() {
 
   /** Vérifie si l'utilisateur est connecté au chargement */
   const checkAuth = useCallback(async () => {
-    const token = localStorage.getItem('access_token');
-    if (!token) {
-      setLoading(false);
-      return;
-    }
-
     try {
+      // Cookie de session présent → profil ; expiré → l'intercepteur tente un renouvellement
       const { data } = await api.get('/auth/me');
       setUser(data.user);
-      connectSocket(token);
+      connectSocket();
     } catch {
-      // Token invalide/expiré → le refresh sera tenté par l'intercepteur axios
+      // Pas de session (visiteur) ou session terminée
       clearUser();
     }
   }, [setUser, clearUser, setLoading]);

@@ -25,29 +25,28 @@ function LoginPageContent() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
-  // Gérer le retour OAuth (tokens dans l'URL)
+  // Retour de la connexion Google : la session est déjà dans les cookies httpOnly
+  // (🔐 plus aucun jeton dans l'URL, l'historique ou les journaux)
   useEffect(() => {
-    const accessToken = searchParams.get('access_token');
-    const refreshToken = searchParams.get('refresh_token');
     const oauthSuccess = searchParams.get('oauth_success');
     const oauthError = searchParams.get('error');
 
     if (oauthError) {
-      setError('La connexion Google a échoué. Veuillez réessayer.');
+      const messages: Record<string, string> = {
+        oauth_email_unverified: "Votre adresse Google n'est pas vérifiée : impossible de la lier à un compte existant.",
+        account_suspended: 'Ce compte est suspendu.',
+      };
+      setError(messages[oauthError] || 'La connexion Google a échoué. Veuillez réessayer.');
       // Nettoyer l'URL
       window.history.replaceState({}, '', '/auth_group/login');
       return;
     }
 
-    if (oauthSuccess === 'true' && accessToken) {
-      // Stocker les tokens
-      localStorage.setItem('access_token', accessToken);
-      if (refreshToken) localStorage.setItem('refresh_token', refreshToken);
-
+    if (oauthSuccess) {
       // Charger le profil et rediriger
       api.get('/auth/me').then(({ data }) => {
         setUser(data.user);
-        connectSocket(accessToken);
+        connectSocket();
         // Nettoyer l'URL avant de rediriger
         window.history.replaceState({}, '', '/auth_group/login');
         router.push('/chat_group');
@@ -72,7 +71,8 @@ function LoginPageContent() {
 
   const handleGoogleLogin = () => {
     // Redirige vers le backend qui redirige vers Google
-    window.location.href = 'http://localhost:4000/api/auth/oauth/google';
+    // Même origine : relayé vers le serveur par Next.js (fonctionne aussi depuis le Wi-Fi)
+    window.location.href = '/api/auth/oauth/google';
   };
 
   const handleGuest = async () => {

@@ -8,6 +8,9 @@
 
 import { AppModalProvider } from '@/components/ui/AppModal';
 import type { Metadata } from 'next';
+import { headers } from 'next/headers';
+// 🔐 Police hébergée par ChatApp (plus d'appel à Google Fonts : RGPD + CSP stricte)
+import '@fontsource-variable/sora';
 import '../styles/globals.css';
 import { AuthProvider } from '@/components/ui/AuthProvider';
 import { CookieBanner } from '@/components/ui/CookieBanner';
@@ -19,12 +22,15 @@ export const metadata: Metadata = {
   manifest: '/manifest.json',
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Nonce de la CSP, généré par proxy.ts pour chaque requête
+  const nonce = (await headers()).get('x-nonce') ?? undefined;
+
   return (
     <html lang="fr" suppressHydrationWarning>
       <head>
         {/* Script inline qui applique le thème AVANT le rendu React = pas de flash */}
-        <ThemeInitScript />
+        <ThemeInitScript nonce={nonce} />
       </head>
       <body suppressHydrationWarning>
         {/* Orbes Glassmorphism */}

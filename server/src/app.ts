@@ -18,6 +18,7 @@ import path from 'path';
 import { db } from './config/database';
 import { corsOrigin } from './utils/cors';
 import { requireAdminGateway } from './middleware/adminGateway.middleware';
+import { csrfProtection } from './middleware/csrf.middleware';
 
 const app = express();
 app.use(helmet());
@@ -25,6 +26,8 @@ app.use(cors({ origin: corsOrigin, credentials: true })); // APP_URL (+ réseau 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(passport.initialize());
+// 🔐 CSRF : requêtes qui modifient des données acceptées uniquement depuis une origine autorisée
+app.use('/api', csrfProtection);
 if (env.isDev) app.use(morgan('dev'));
 
 app.get('/api/health', (_req, res) => {

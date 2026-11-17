@@ -1,6 +1,7 @@
 import { io, Socket } from 'socket.io-client';
 import type { ClientToServerEvents, ServerToClientEvents } from '@shared/types/websocket.types';
-import { showModal } from '@/components/ui/AppModal';
+import { forceBannedExit } from '@/lib/banGuard';
+import { refreshSession } from '@/lib/api';
 
 type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
 
@@ -19,7 +20,10 @@ type TypedSocket = Socket<ServerToClientEvents, ClientToServerEvents>;
  *  2. Le token est relu à CHAQUE (re)connexion.
  *     Avant : le token était figé à la création. Après 15 min (expiration) ou un redémarrage
  *     du serveur, toutes les reconnexions échouaient avec « Token invalide ou expiré ».
- *     Maintenant : token lu dans localStorage à chaque tentative + renouvellement automatique.
+ *     Maintenant : renouvellement automatique de la session puis nouvelle tentative.
+ *
+ *  3. 🔐 Le jeton n'est plus manipulé par JavaScript : il voyage dans le cookie httpOnly
+ *     envoyé avec la poignée de main WebSocket (withCredentials).
  */
 
 /**
@@ -39,27 +43,6 @@ function getSocketUrl(): string {
 let socket: TypedSocket | null = null;
 let refreshing = false;
 
-/** Renouvelle l'access token avec le refresh token. true si réussi. */
-async function refreshAccessToken(): Promise<boolean> {
-  const refreshToken = localStorage.getItem('refresh_token');
-  if (!refreshToken) return false; // invités : pas de refresh token
-  try {
-    const res = await fetch('/api/auth/refresh', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
-    });
-    if (!res.ok) return false;
-    const data = await res.json();
-    if (!data?.access_token) return false;
-    localStorage.setItem('access_token', data.access_token);
-    if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /** Crée l'instance unique (sans se connecter) — navigateur uniquement */
 function ensureSocket(): TypedSocket | null {
   if (typeof window === 'undefined') return null;
@@ -67,8 +50,8 @@ function ensureSocket(): TypedSocket | null {
 
   socket = io(getSocketUrl(), {
     autoConnect: false,
-    // Fonction → le token le plus récent est envoyé à chaque tentative de connexion
-    auth: (cb) => cb({ token: localStorage.getItem('access_token') || '' }),
+    // 🔐 Le cookie de session (httpOnly) accompagne la connexion, y compris en mode « polling »
+    withCredentials: true,
     transports: ['websocket', 'polling'],
     reconnection: true,
     reconnectionAttempts: 10,
@@ -84,19 +67,26 @@ function ensureSocket(): TypedSocket | null {
     console.log('👋 WebSocket déconnecté:', reason);
   });
 
+  // 🔐 Bannissement : sortie immédiate du chat (motif affiché sur l'accueil)
+  socket.on('moderation:banned', (data) => {
+    socket?.disconnect();
+    void forceBannedExit(data || {});
+  });
+
   socket.on('connect_error', async (error) => {
     console.error('❌ Erreur WebSocket:', error.message);
 
-    // Compte banni : prévenir clairement l'utilisateur (pas de nouvelle tentative)
+    // Compte banni (notification manquée : écran éteint, réseau coupé…) → même sortie, sans nouvelle tentative
     if (error.message === 'Compte suspendu') {
-      showModal('Votre compte est suspendu. Vous ne pouvez plus accéder au chat pour le moment.', 'error');
+      socket?.disconnect();
+      void forceBannedExit();
       return;
     }
 
     // Token expiré / invalide : on le renouvelle puis on retente une fois
     if (/token/i.test(error.message) && !refreshing) {
       refreshing = true;
-      const ok = await refreshAccessToken();
+      const ok = await refreshSession();
       refreshing = false;
       if (ok && socket && !socket.connected) socket.connect();
     }
@@ -110,11 +100,8 @@ export function getSocket(): TypedSocket | null {
   return ensureSocket();
 }
 
-/**
- * Ouvre la connexion. Le paramètre token est conservé pour compatibilité :
- * le token réellement utilisé est relu dans localStorage à chaque connexion.
- */
-export function connectSocket(_token?: string): TypedSocket | null {
+/** Ouvre la connexion (la session est portée par le cookie httpOnly). */
+export function connectSocket(): TypedSocket | null {
   const s = ensureSocket();
   if (s && !s.connected) s.connect();
   return s;

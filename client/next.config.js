@@ -30,6 +30,25 @@ const nextConfig = {
     unoptimized: true,
   },
 
+  // 🔐 En-têtes de sécurité sur toutes les réponses (la CSP est posée par proxy.ts, avec nonce)
+  async headers() {
+    const security = [
+      { key: 'X-Content-Type-Options', value: 'nosniff' },
+      { key: 'X-Frame-Options', value: 'DENY' },
+      { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+      { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=()' },
+      { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+    ];
+    if (process.env.NODE_ENV === 'production') {
+      // HTTPS obligatoire pendant 1 an (pris en compte uniquement derrière HTTPS)
+      security.push({ key: 'Strict-Transport-Security', value: 'max-age=31536000; includeSubDomains' });
+    }
+    return [{ source: '/:path*', headers: security }];
+  },
+
+  // Ne pas annoncer « X-Powered-By: Next.js »
+  poweredByHeader: false,
+
   // Redirige les appels API vers le backend en dev
   async rewrites() {
     return [

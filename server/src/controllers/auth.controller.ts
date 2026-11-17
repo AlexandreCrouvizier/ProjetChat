@@ -14,6 +14,10 @@ import type { Request, Response } from 'express';
 import { authService } from '../services/auth.service';
 import { getIpFromRequest } from '../utils/ip';
 import { AppError } from '../utils/errors';
+import { verifyRefreshToken } from '../utils/jwt';
+import {
+  COOKIE, readRequestCookie, setSessionCookies, clearSessionCookies, withoutTokens,
+} from '../utils/authCookies';
 
 export const authController = {
 
@@ -39,7 +43,9 @@ export const authController = {
         userAgent: req.headers['user-agent'],
       });
 
-      res.status(201).json(result);
+      // 🔐 Jetons en cookies httpOnly, jamais dans le JSON
+      setSessionCookies(res, result);
+      res.status(201).json(withoutTokens(result));
     } catch (error: any) {
       handleError(res, error);
     }
@@ -65,7 +71,8 @@ export const authController = {
         userAgent: req.headers['user-agent'],
       });
 
-      res.json(result);
+      setSessionCookies(res, result);
+      res.json(withoutTokens(result));
     } catch (error: any) {
       handleError(res, error);
     }
@@ -83,7 +90,8 @@ export const authController = {
         userAgent: req.headers['user-agent'],
       });
 
-      res.status(201).json(result);
+      setSessionCookies(res, result);
+      res.status(201).json(withoutTokens(result));
     } catch (error: any) {
       handleError(res, error);
     }
@@ -92,24 +100,28 @@ export const authController = {
   /** POST /api/auth/refresh */
   async refresh(req: Request, res: Response): Promise<void> {
     try {
-      const { refresh_token } = req.body;
+      // 🔐 Le jeton de renouvellement n'est lu QUE dans son cookie httpOnly (chemin /api/auth)
+      const refreshToken = readRequestCookie(req, COOKIE.refresh);
 
-      if (!refresh_token) {
-        res.status(400).json({
-          error: 'VALIDATION_ERROR',
-          message: 'refresh_token est requis',
+      if (!refreshToken) {
+        res.status(401).json({
+          error: 'NO_SESSION',
+          message: 'Aucune session à renouveler',
         });
         return;
       }
 
       const result = await authService.refreshTokens({
-        refreshToken: refresh_token,
+        refreshToken,
         ip: getIpFromRequest(req),
         userAgent: req.headers['user-agent'],
       });
 
-      res.json(result);
+      setSessionCookies(res, result);
+      res.json(withoutTokens(result));
     } catch (error: any) {
+      // Session invalide → on efface les cookies pour ne pas réessayer en boucle
+      if (error instanceof AppError && error.statusCode === 401) clearSessionCookies(res);
       handleError(res, error);
     }
   },
@@ -117,15 +129,25 @@ export const authController = {
   /** POST /api/auth/logout */
   async logout(req: Request, res: Response): Promise<void> {
     try {
-      const { refresh_token } = req.body;
+      const refreshToken = readRequestCookie(req, COOKIE.refresh);
 
-      await authService.logout({
-        refreshToken: refresh_token,
-        userId: req.user!.userId,
-        ip: getIpFromRequest(req),
-        userAgent: req.headers['user-agent'],
-      });
+      // Utilisateur : celui du jeton d'accès, sinon celui du jeton de renouvellement
+      // (permet de se déconnecter proprement même si le jeton d'accès a expiré)
+      let userId = req.user?.userId;
+      if (!userId && refreshToken) {
+        try { userId = verifyRefreshToken(refreshToken).userId; } catch { /* jeton invalide */ }
+      }
 
+      if (userId) {
+        await authService.logout({
+          refreshToken,
+          userId,
+          ip: getIpFromRequest(req),
+          userAgent: req.headers['user-agent'],
+        });
+      }
+
+      clearSessionCookies(res);
       res.json({ message: 'Déconnecté' });
     } catch (error: any) {
       handleError(res, error);

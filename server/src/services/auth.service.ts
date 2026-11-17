@@ -253,21 +253,25 @@ export const authService = {
       username = undefined;
     }
 
+    if (username) {
+      // Pseudo choisi : refusé s'il appartient à un inscrit
+      if (await userRepository.isUsernameTaken(username)) {
+        throw new ValidationError('Ce pseudo est réservé par un utilisateur inscrit', 'username');
+      }
+      // Déjà pris par un autre invité → pseudo automatique
+      if (await userRepository.findByUsername(username)) username = undefined;
+    }
+
     if (!username) {
-      const counter = await redis.incr('guest:username_counter');
-      username = `Invité_${String(counter).padStart(5, '0')}`;
-    }
-
-    // Vérifier que le pseudo n'est pas pris par un inscrit
-    if (await userRepository.isUsernameTaken(username)) {
-      throw new ValidationError('Ce pseudo est réservé par un utilisateur inscrit', 'username');
-    }
-
-    // Pseudo invité déjà pris → en générer un nouveau
-    const existingByUsername = await userRepository.findByUsername(username);
-    if (existingByUsername && existingByUsername.tier === 'guest') {
-      const counter = await redis.incr('guest:username_counter');
-      username = `Invité_${String(counter).padStart(5, '0')}`;
+      // 🐛 Pseudo automatique Invité_00042 : on avance jusqu'à un nom libre.
+      // Avant : une seule nouvelle tentative → si Redis était vidé ou redémarré (compteur remis à 0),
+      // la connexion invité plantait (erreur 500, pseudo déjà existant en base).
+      for (let attempt = 0; attempt < 50 && !username; attempt++) {
+        const counter = await redis.incr('guest:username_counter');
+        const candidate = `Invité_${String(counter).padStart(5, '0')}`;
+        if (!(await userRepository.findByUsername(candidate))) username = candidate;
+      }
+      if (!username) username = `Invité_${crypto.randomBytes(4).toString('hex')}`;
     }
 
     // ── 3. Créer le nouveau compte invité ─────────────────────────────────

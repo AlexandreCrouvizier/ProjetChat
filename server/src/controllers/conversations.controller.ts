@@ -97,7 +97,7 @@ export const conversationsController = {
       if (!(await conversationRepository.isParticipant(id, userId))) {
         res.status(403).json({ error: 'FORBIDDEN', message: 'Non participant' }); return;
       }
-      await conversationRepository.hideForUser(id, userId);
+      await conversationRepository.hide(id, userId);  // (appelait hideForUser, qui n'existe pas → erreur 500)
       res.json({ message: 'Conversation masquée' });
     } catch (error: any) {
       console.error('❌ hide conversation:', error);

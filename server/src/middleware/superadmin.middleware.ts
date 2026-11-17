@@ -13,6 +13,7 @@ import jwt from 'jsonwebtoken';
 import crypto from 'crypto';
 import { db } from '../config/database';
 import { env } from '../config/env';
+import { COOKIE, readRequestCookie } from '../utils/authCookies';
 
 // Le secret pour les admin tokens est différent du JWT principal
 // 🔐 SÉCURITÉ : l'ancienne valeur (env.JWT_SECRET + '_admin_panel') valait la chaîne publique
@@ -45,12 +46,12 @@ export async function requireSuperAdmin(req: Request, res: Response, next: NextF
 }
 
 /**
- * Vérifie le JWT admin (émis après TOTP) dans le header X-Admin-Token
+ * Vérifie le JWT admin (émis après TOTP), lu dans le cookie httpOnly chatapp_admin
  * Ce token a une durée courte (30 min)
  */
 export async function requireAdminToken(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
-    const adminToken = req.headers['x-admin-token'] as string;
+    const adminToken = readRequestCookie(req, COOKIE.admin);
 
     if (!adminToken) {
       res.status(403).json({ error: 'ADMIN_TOKEN_REQUIRED', message: 'Token admin requis' });
@@ -82,6 +83,6 @@ export function generateAdminToken(userId: string): string {
   return jwt.sign(
     { userId, isAdmin: true },
     ADMIN_JWT_SECRET,
-    { expiresIn: '30m' }
+    { algorithm: 'HS256', expiresIn: '30m' }
   );
 }

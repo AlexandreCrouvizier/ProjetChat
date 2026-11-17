@@ -49,7 +49,6 @@ function ChatPageContent() {
   const [showCreateGroup, setShowCreateGroup] = useState(false);
   const [reportTarget, setReportTarget] = useState<{ messageId: string; content: string; author: string } | null>(null);
   const [muteInfo, setMuteInfo] = useState<{ duration: string; reason: string; expires_at?: string | null; admin_message?: string } | null>(null);
-  const [banInfo, setBanInfo] = useState<{ duration: string; reason: string; admin_message?: string } | null>(null);
 
   // ⭐ État invitation : modal de confirmation inline
   const [inviteInfo, setInviteInfo] = useState<{
@@ -107,25 +106,19 @@ function ChatPageContent() {
     }
   }, [groups, activeGroupId, joinGroup, mode]);
 
-  // ⭐ Écouter les notifications de mute/ban
+  // ⭐ Écouter les notifications de mute
+  // (le bannissement est géré globalement par lib/socket.ts → sortie immédiate vers l'accueil)
   useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
     const onMuted = (data: { duration: string; reason: string; expires_at?: string | null; admin_message?: string }) => {
       setMuteInfo({ duration: data.duration, reason: data.reason, expires_at: data.expires_at, admin_message: data.admin_message });
     };
-    const onBanned = (data: { duration: string; reason: string; admin_message?: string }) => {
-      setBanInfo({ duration: data.duration, reason: data.reason, admin_message: data.admin_message });
-      // ⭐ Forcer la déconnexion après 8s même si l'utilisateur ne clique pas
-      setTimeout(() => { logout(); }, 8000);
-    };
     socket.on('moderation:muted', onMuted);
-    socket.on('moderation:banned', onBanned);
     return () => {
       socket.off('moderation:muted', onMuted);
-      socket.off('moderation:banned', onBanned);
     };
-  }, [logout]);
+  }, []);
 
   const handleSelectGroup = async (g: Group) => {
     setMode('group'); setActiveGroupId(g.id); setActiveGroupName(g.name); setActiveConvId(null); await joinGroup(g.id);
@@ -354,51 +347,6 @@ function ChatPageContent() {
         );
       })()}
 
-      {/* ⭐ Popup notification ban */}
-      {banInfo && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm animate-fadeIn">
-          <div className="w-[420px] rounded-2xl overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.7)]"
-            style={{ background: 'rgba(15,15,35,0.98)', backdropFilter: 'blur(20px)', border: '1px solid rgba(239,68,68,0.2)' }}>
-            <div className="h-1.5" style={{ background: 'linear-gradient(90deg, #ef4444, #b91c1c, #ef4444)' }} />
-            <div className="p-8 text-center">
-              <div className="text-5xl mb-4">🚫</div>
-              <h2 className="text-xl font-bold text-white mb-2">Compte banni</h2>
-              <div className="p-4 rounded-xl mb-5 space-y-2"
-                style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)' }}>
-                <p className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>
-                  {banInfo.duration && banInfo.duration !== 'permanent'
-                    ? `Votre compte a été banni pour ${banInfo.duration}.`
-                    : 'Votre compte a été banni définitivement.'}
-                </p>
-                {banInfo.reason && (
-                  <p className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.45)' }}>
-                    <span style={{ color: 'rgba(255,255,255,0.3)' }}>Motif :</span> {banInfo.reason}
-                  </p>
-                )}
-                {banInfo.admin_message && (
-                  <div className="mt-2 pt-2" style={{ borderTop: '1px solid rgba(239,68,68,0.15)' }}>
-                    <p className="text-xs italic" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                      💬 {banInfo.admin_message}
-                    </p>
-                  </div>
-                )}
-              </div>
-              <button
-                onClick={async () => { setBanInfo(null); await logout(); }}
-                className="w-full py-3 rounded-xl font-semibold text-white text-sm transition-all"
-                style={{ background: 'linear-gradient(135deg, #ef4444, #b91c1c)' }}>
-                Se déconnecter
-              </button>
-              <p className="text-[11px] mt-2" style={{ color: 'rgba(255,255,255,0.2)' }}>
-                Déconnexion automatique dans 8 secondes.
-              </p>
-              <p className="text-[11px] mt-3" style={{ color: 'rgba(255,255,255,0.25)' }}>
-                Pour contester cette décision, contactez le support.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ⭐ Toast erreur invitation */}
       {inviteError && (

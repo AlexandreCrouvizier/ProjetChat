@@ -19,27 +19,25 @@ import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { safeMediaUrl } from '@/lib/safeUrl';
 
-// ─── SessionStorage helpers ───────────────────────────────────────
-const ADMIN_TOKEN_KEY = 'admin_token';
+// ─── Session admin ────────────────────────────────────────────────
+// 🔐 Le jeton admin (émis après TOTP) est dans un cookie httpOnly : JavaScript ne le voit pas.
+// On ne garde ici que l'heure d'expiration, pour le compte à rebours et l'écran à afficher.
 const ADMIN_EXPIRES_KEY = 'admin_expires';
+const ADMIN_SESSION = 'cookie'; // marqueur : « une session admin est active »
 
 function getStoredToken(): string | null {
   if (typeof window === 'undefined') return null;
-  const token = sessionStorage.getItem(ADMIN_TOKEN_KEY);
   const expires = Number(sessionStorage.getItem(ADMIN_EXPIRES_KEY) || '0');
-  if (token && Date.now() < expires) return token;
-  sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+  if (Date.now() < expires) return ADMIN_SESSION;
   sessionStorage.removeItem(ADMIN_EXPIRES_KEY);
   return null;
 }
 
-function storeToken(token: string, expiresIn: number) {
-  sessionStorage.setItem(ADMIN_TOKEN_KEY, token);
+function storeToken(expiresIn: number) {
   sessionStorage.setItem(ADMIN_EXPIRES_KEY, String(Date.now() + expiresIn * 1000));
 }
 
 function clearToken() {
-  sessionStorage.removeItem(ADMIN_TOKEN_KEY);
   sessionStorage.removeItem(ADMIN_EXPIRES_KEY);
 }
 
@@ -189,12 +187,23 @@ export default function AdminPanelPage() {
       setScreen('verify');
       throw new Error('SESSION_EXPIRED');
     }
-    const config = { headers: { 'X-Admin-Token': token } };
     const fullUrl = `/admin${url}`;
-    if (method === 'get') return (await api.get(fullUrl, config)).data;
-    if (method === 'post') return (await api.post(fullUrl, body, config)).data;
-    if (method === 'patch') return (await api.patch(fullUrl, body, config)).data;
-    if (method === 'delete') return (await api.delete(fullUrl, config)).data;
+    try {
+      // Le cookie admin (httpOnly) est joint automatiquement par le navigateur
+      if (method === 'get') return (await api.get(fullUrl)).data;
+      if (method === 'post') return (await api.post(fullUrl, body)).data;
+      if (method === 'patch') return (await api.patch(fullUrl, body)).data;
+      if (method === 'delete') return (await api.delete(fullUrl)).data;
+    } catch (err: any) {
+      // Session admin expirée ou absente côté serveur → nouveau code TOTP
+      if (err?.response?.status === 403 && /ADMIN_TOKEN/.test(err.response?.data?.error || '')) {
+        clearToken();
+        adminTokenRef.current = null;
+        setScreen('verify');
+        throw new Error('SESSION_EXPIRED');
+      }
+      throw err;
+    }
   }, []);
 
   // ══════════════════════════════════════════════════════════════
@@ -410,13 +419,11 @@ export default function AdminPanelPage() {
         setLoginLoading(true);
         setError('');
         try {
-            const { data } = await api.post('/auth/login', {
+            await api.post('/auth/login', {
                 email: loginIdentifier.trim(),
                 password: loginPassword,
             });
-            // Stocker les tokens comme le fait useAuth
-            localStorage.setItem('access_token', data.access_token);
-            if (data.refresh_token) localStorage.setItem('refresh_token', data.refresh_token);
+            // La session est posée en cookies httpOnly par le serveur
             // Forcer le rechargement pour que useAuth récupère l'utilisateur
             window.location.reload();
         } catch (err: any) {
@@ -431,9 +438,10 @@ export default function AdminPanelPage() {
     setError('');
     try {
       const { data } = await api.post('/admin-auth/verify', { code });
-      adminTokenRef.current = data.admin_token;
+      // Le jeton admin est dans un cookie httpOnly ; on ne garde que l'expiration
+      adminTokenRef.current = ADMIN_SESSION;
       tokenExpiresRef.current = Date.now() + data.expires_in * 1000;
-      storeToken(data.admin_token, data.expires_in);
+      storeToken(data.expires_in);
       setScreen('dashboard');
     } catch (err: any) {
       setError(err.response?.data?.message || 'Code invalide');
@@ -444,6 +452,7 @@ export default function AdminPanelPage() {
   };
 
   const handleLogout = () => {
+    api.post('/admin-auth/logout').catch(() => { /* cookie expirant de toute façon */ });
     clearToken();
     adminTokenRef.current = null;
     tokenExpiresRef.current = 0;

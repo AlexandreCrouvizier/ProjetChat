@@ -9,7 +9,7 @@
  * 
  * Note : pour le MVP, on n'utilise pas encore de cookies tiers (AdSense viendra en Phase 4).
  * Mais le bandeau est nécessaire dès maintenant pour :
- *   - Le JWT stocké en localStorage (pas un cookie, mais bonne pratique d'informer)
+ *   - Les cookies de session (httpOnly, strictement nécessaires : exemptés de consentement CNIL)
  *   - Les données de connexion conservées 1 an (LCEN)
  *   - La conformité anticipée pour AdSense
  */

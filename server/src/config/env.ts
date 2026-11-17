@@ -1,8 +1,20 @@
 import dotenv from 'dotenv';
 import path from 'path';
+import fs from 'fs';
 
-// Charge le .env depuis la racine du projet
-dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
+// Charge le .env depuis la racine du projet.
+// src/config (dev, tsx) et dist/server/src/config (build) n'ont pas la même profondeur :
+// on remonte jusqu'à trouver le dossier qui contient à la fois server/ et .env.
+function findRootEnv(): string {
+  let dir = __dirname;
+  for (let i = 0; i < 6; i++) {
+    const candidate = path.join(dir, '.env');
+    if (fs.existsSync(candidate) && fs.existsSync(path.join(dir, 'server'))) return candidate;
+    dir = path.dirname(dir);
+  }
+  return path.resolve(process.cwd(), '..', '.env');
+}
+dotenv.config({ path: findRootEnv() });
 
 export const env = {
   // App
@@ -40,11 +52,15 @@ export const env = {
   // 🔐 Secret ajouté par la passerelle admin (port ADMIN_PORT, PC uniquement).
   // Vide → panel et API admin désactivés (fermé par défaut).
   ADMIN_GATEWAY_SECRET: process.env.ADMIN_GATEWAY_SECRET || '',
+
+  // 🔐 Clé de chiffrement des secrets TOTP en base (64 caractères hexadécimaux).
+  // Ne JAMAIS la changer une fois des secrets créés : sinon il faut reconfigurer le TOTP.
+  TOTP_ENCRYPTION_KEY: process.env.TOTP_ENCRYPTION_KEY || '',
 };
 
 // Vérifie les variables critiques en production
 if (!env.isDev) {
-  const required = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'ADMIN_JWT_SECRET', 'ADMIN_GATEWAY_SECRET', 'DATABASE_URL'];
+  const required = ['JWT_ACCESS_SECRET', 'JWT_REFRESH_SECRET', 'ADMIN_JWT_SECRET', 'ADMIN_GATEWAY_SECRET', 'TOTP_ENCRYPTION_KEY', 'DATABASE_URL'];
   for (const key of required) {
     if (!process.env[key]) {
       throw new Error(`Variable d'environnement manquante : ${key}`);

@@ -21,7 +21,7 @@ import { Router } from 'express';
 import { requireAuth } from '../middleware/auth.middleware';
 import { requireSuperAdmin, requireAdminToken } from '../middleware/superadmin.middleware';
 import { rateLimit } from '../middleware/rateLimit.middleware';
-import { revokeUserAccess } from '../services/accessRevocation.service';
+import { revokeUserAccess, restoreUserAccess } from '../services/accessRevocation.service';
 import { adminAuthController } from '../controllers/admin-auth.controller';
 import { cleanupService } from '../services/cleanup.service';
 import { moderationActionRepository } from '../repositories/moderation-action.repository';
@@ -39,6 +39,7 @@ adminAuthRouter.get('/status', adminAuthController.status);
 adminAuthRouter.post('/setup', adminAuthController.setup);
 // 🔐 Anti brute-force TOTP : 5 essais / 15 min par compte
 adminAuthRouter.post('/verify', rateLimit({ name: 'totp', max: 5, windowSeconds: 900, by: 'user' }), adminAuthController.verify);
+adminAuthRouter.post('/logout', adminAuthController.logout);
 
 // ══════════════════════════════════
 // Dashboard admin (post-TOTP)
@@ -215,19 +216,13 @@ adminRouter.post('/users/:id/ban', async (req, res) => {
       }
     }
 
-    // ⭐ Notification WebSocket
-    const io = req.app.get('io');
-    if (io) {
-      io.to(`user:${targetId}`).emit('moderation:banned', {
-        duration: duration || 'permanent',
-        reason: finalReason,
-        expires_at: banAction.expires_at,
-        admin_message: admin_message || undefined,
-      });
-    }
-
-    // 🔐 Couper réellement l'accès (sessions + WebSocket)
-    await revokeUserAccess(io, targetId);
+    // 🔐 Prévenir l'utilisateur puis couper immédiatement son accès (API, sessions, WebSocket)
+    await revokeUserAccess(req.app.get('io'), targetId, {
+      duration: duration || 'permanent',
+      reason: finalReason,
+      expires_at: banAction.expires_at,
+      admin_message: admin_message || undefined,
+    });
 
     res.json({ message: 'Utilisateur banni', expires_at: banAction.expires_at });
   } catch (error: any) {
@@ -246,6 +241,7 @@ adminRouter.post('/users/:id/unban', async (req, res) => {
     await db('users').where({ id: targetId }).update({
       is_banned: false, ban_reason: null, ban_expires_at: null,
     });
+    await restoreUserAccess(targetId);
 
     // 🐛 Correctif : un invité est aussi banni par son empreinte navigateur.
     // Sans ça, il restait bloqué à la reconnexion même après le débannissement.
@@ -458,14 +454,13 @@ adminRouter.post('/reports/action', async (req, res) => {
         ban_reason: reason,
         ban_expires_at: banAction.expires_at || null,
       });
-      if (notify && io) {
-        io.to(`user:${reported_user_id}`).emit('moderation:banned', {
-          duration: duration || 'permanent',
-          reason,
-          expires_at: banAction.expires_at,
-          admin_message: admin_message || undefined,
-        });
-      }
+      // 🔐 Couper réellement l'accès (avant : seul un message était envoyé, et seulement si « notifier »)
+      await revokeUserAccess(io, reported_user_id, notify ? {
+        duration: duration || 'permanent',
+        reason,
+        expires_at: banAction.expires_at,
+        admin_message: admin_message || undefined,
+      } : undefined);
     }
 
     res.json({
@@ -569,9 +564,11 @@ adminRouter.delete('/security/fingerprints/:fp', async (req, res) => {
     const result = await guestSecurityService.unbanFingerprint(req.params.fp);
     // 🐛 Débannir l'empreinte débannit aussi le compte invité correspondant
     // (avant : il fallait aussi le faire dans l'onglet Utilisateurs)
+    const accounts = await db('users').where({ guest_fingerprint: req.params.fp }).select('id');
     await db('users').where({ guest_fingerprint: req.params.fp }).update({
       is_banned: false, ban_reason: null, ban_expires_at: null,
     });
+    for (const a of accounts) await restoreUserAccess(a.id);
     res.json({ success: true, ip_auto_ban_lifted: result.ipAutoBanLifted });
   } catch { res.status(500).json({ error: 'INTERNAL_ERROR' }); }
 });

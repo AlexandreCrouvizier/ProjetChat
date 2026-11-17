@@ -71,18 +71,67 @@ Next 14.2.35 cumulait des failles **critiques d'exécution de code à distance**
 - [x] Fermé par défaut : sans passerelle lancée, ou sans secret dans le `.env`, le panel est inaccessible
 - ⚠️ Production : NGINX jouera le rôle de la passerelle (vhost admin restreint par IP/VPN, qui ajoute l'en-tête). `ADMIN_GATEWAY_SECRET` est obligatoire en production (64 caractères min.)
 
-## Lot 4 — Renforcement (🔜)
+## Lot 4 — Renforcement, partie 1 (✅ fait le 17/11/2026)
 
-- [ ] Tokens dans des **cookies `httpOnly`** au lieu de `localStorage` (une faille XSS ne pourrait plus voler la session)
-- [ ] Politique **CSP** pour l'application Next.js
+Vérifié par **26 tests automatisés** (vrai serveur + vraie base de données) et un parcours dans un vrai navigateur (Chromium).
+
+**Typage (garde-fou)**
+- [x] Erreurs TypeScript : serveur **78 → 0**, client **50 → 0** (`npm run typecheck` dans `client/` et `server/`)
+- [x] Cause principale : `req.user` déclaré deux fois (passport + nous) → on complète `Express.User`
+- [x] `tsconfig` serveur : `rootDir` = racine du projet (le serveur importe `shared/`) ; build → `dist/server/src/index.js`
+
+**Sessions en cookies `httpOnly`** (une faille XSS ne peut plus voler la session)
+- [x] `chatapp_at` (accès, 15 min, `Path=/`), `chatapp_rt` (renouvellement, 7 j, `Path=/api/auth`), `chatapp_admin` (panel, 30 min, `Path=/api`)
+- [x] `HttpOnly` + `SameSite=Strict` (+ `Secure` en production) ; plus aucun jeton dans le JSON ni dans `localStorage`
+- [x] WebSocket authentifié par le cookie de la poignée de main
+- [x] **CSRF** : `middleware/csrf.middleware.ts` — toute requête qui modifie des données doit venir d'une origine autorisée
+- [x] Déconnexion possible même avec un jeton d'accès expiré ; cookies effacés côté serveur
+- [x] Jetons avec identifiant unique (`jti`) : avant, deux jetons émis dans la même seconde étaient identiques (rotation inefficace)
+
+**OAuth Google**
+- [x] Plus aucun jeton dans l'URL de retour (cookies posés par le serveur)
+- [x] `email_verified` exigé avant de lier un compte Google à un compte existant (anti prise de contrôle)
+- [x] Compte banni : connexion Google refusée
+
+**TOTP du panel**
+- [x] `otplib` 13 (maintenue, crypto auditée) à la place de `speakeasy` (abandonnée)
+- [x] Secret chiffré en base (AES-256-GCM, `TOTP_ENCRYPTION_KEY`) ; anciens secrets rechiffrés automatiquement
+- [x] Code à usage unique (anti-rejeu) ; tolérance ±30 s au lieu de ±60 s
+
+**CSP et en-têtes (client)**
+- [x] CSP avec **nonce** par requête (`client/proxy.ts`) : seuls les scripts de Next.js et les nôtres s'exécutent
+- [x] `connect-src` limité au serveur temps réel et aux API GIF ; `frame-ancestors 'none'`, `object-src 'none'`, `base-uri 'self'`
+- [x] En-têtes : `X-Content-Type-Options`, `X-Frame-Options: DENY`, `Referrer-Policy`, `Permissions-Policy`, `COOP`, HSTS (production), `X-Powered-By` retiré
+- [x] Police **Sora hébergée localement** (`@fontsource-variable/sora`) : plus d'appel à Google Fonts (RGPD : l'IP des visiteurs n'est plus transmise à Google)
+
+**Bugs trouvés en route**
+- [x] « Masquer une conversation privée » → erreur 500 (fonction inexistante)
+- [x] Connexion invité → erreur 500 si Redis était vidé/redémarré (compteur de pseudos remis à zéro)
+
+## Correctif — Bannissement immédiat (✅ fait le 17/11/2026)
+
+Symptôme : le banni voyait un message, cliquait « OK » et restait sur la page du chat
+(à moitié déconnecté, cookies encore valides jusqu'à 15 min).
+
+- **Serveur** : marqueur Redis `revoked:user:{id}` posé au ban (durée = vie d'un jeton d'accès + 1 min),
+  vérifié par `requireAuth` (→ 403 `ACCOUNT_SUSPENDED`), `optionalAuth` (→ visiteur anonyme) et la connexion WebSocket ;
+  levé au débannissement (panel admin, empreinte invité, modérateurs).
+- `revokeUserAccess()` centralise : marqueur + suppression des sessions + notification + fermeture des WebSocket.
+- 🐛 Le ban depuis un **signalement** (« masquer + bannir ») ne coupait pas l'accès : corrigé.
+  Le ban par un **modérateur** prévient maintenant l'utilisateur.
+- **Client** : `lib/banGuard.ts` — à n'importe quel signal (notification, reconnexion refusée « Compte suspendu »,
+  API 403) : état vidé, cookies effacés, rechargement complet vers l'accueil, motif affiché sur l'accueil.
+- Testé : 14/14 (API + navigateur en ligne + téléphone hors ligne pendant le ban) et 26/26 e2e.
+
+## Lot 4 — Renforcement, partie 2 (🔜)
+
 - [ ] **Clé API GIF** : appels via le serveur (aujourd'hui la clé est envoyée au navigateur)
-- [ ] **OAuth Google** : tokens dans l'URL de retour → code d'échange à usage unique ; vérifier `email_verified` avant de lier un compte existant
-- [ ] **TOTP** : chiffrer le secret en base, remplacer `speakeasy` (abandonné) par `otplib`, empêcher la réutilisation d'un même code
 - [ ] **Empreinte invité** : elle sert aussi de « clé » de reconnexion → la lier à un secret serveur
 - [ ] **Avatars** : stocker en fichier (pas en base64 de 700 Ko dans la table `users`), refuser les URLs externes
 - [ ] **Fichiers uploadés** : les rattacher à l'utilisateur en base (traçabilité LCEN), quota de stockage
 - [ ] Indicateur « en train d'écrire » : vérifier l'appartenance au salon ; remplacer `KEYS` par `SCAN` dans Redis
-- [ ] Corriger les erreurs TypeScript du serveur (78 ; client ✅ 0) et ajouter `tsc --noEmit` comme garde-fou
+- [ ] Lancer `npm run typecheck` automatiquement avant chaque commit (hook Git) ou en intégration continue
+- [ ] Invités : jeton de renouvellement (aujourd'hui, reconnexion obligatoire après 15 min d'inactivité du WebSocket)
 - [ ] Production : NGINX + HTTPS + HSTS, domaine séparé pour les fichiers uploadés, sauvegardes chiffrées
 
 ---
@@ -95,3 +144,7 @@ Next 14.2.35 cumulait des failles **critiques d'exécution de code à distance**
 4. **Jamais de `fetch` serveur vers une URL fournie par un utilisateur** sans passer par la protection anti-SSRF de `linkPreview.service.ts`.
 5. **URLs affichées dans l'interface** : toujours via `safeMediaUrl()` / `safeHttpsUrl()` (`client/lib/safeUrl.ts`).
 6. **IP du client** : toujours `getIpFromRequest()` / `getIpFromSocket()`, jamais `req.ip` ni l'en-tête brut.
+7. **Jetons de session** : uniquement via `utils/authCookies.ts` (cookies httpOnly). Jamais de jeton dans une réponse JSON, une URL ou `localStorage`.
+8. **Pas de script inline** dans le client : la CSP le bloquerait. Si c'est indispensable, lui passer le `nonce` (voir `ThemeInitScript`).
+9. **Nouvelle API externe appelée par le navigateur** : l'ajouter à `connect-src` dans `client/proxy.ts`.
+10. **Avant chaque commit** : `npm run typecheck` dans `client/` et `server/` doit afficher 0 erreur.

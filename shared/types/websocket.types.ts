@@ -52,7 +52,7 @@ export interface ServerToClientEvents {
 
   // Compte / modération
   'notification:new': (data: NotificationPayload) => void;
-  'moderation:banned': (data: any) => void;
+  'moderation:banned': (data: { duration?: string; reason?: string; expires_at?: string | null; admin_message?: string }) => void;
   'moderation:muted': (data: any) => void;
   'user:tier_updated': (data: { tier: string }) => void;
 }

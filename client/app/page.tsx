@@ -6,12 +6,40 @@
 
 import Link from 'next/link';
 import { useAuth } from '@/hooks/useAuth';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { showModal } from '@/components/ui/AppModal';
+import { BAN_EVENT, takeBanNotice, type BanNotice } from '@/lib/banGuard';
+
+/** Texte de la durée d'un bannissement (« 1h », « 7d », « permanent »…) */
+function banDurationText(n: BanNotice): string {
+  if (n.expires_at) {
+    const d = new Date(n.expires_at);
+    if (!Number.isNaN(d.getTime())) {
+      return `Votre compte est suspendu jusqu'au ${d.toLocaleDateString('fr-FR')} à ${d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}.`;
+    }
+  }
+  if (n.duration && n.duration !== 'permanent') return `Votre compte a été suspendu pour ${n.duration}.`;
+  if (n.duration === 'permanent') return 'Votre compte a été banni définitivement.';
+  return 'Votre compte est suspendu : vous ne pouvez plus accéder au chat pour le moment.';
+}
 
 export default function LandingPage() {
   const { loginAsGuest } = useAuth();
   const [loading, setLoading] = useState(false);
+  // 🔐 Motif du bannissement (l'utilisateur vient d'être sorti du chat)
+  const [banNotice, setBanNotice] = useState<BanNotice | null>(null);
+
+  useEffect(() => {
+    const show = () => {
+      const n = takeBanNotice();
+      if (n) setBanNotice(n);
+      // Nettoyer l'adresse (?banned=1) sans recharger
+      if (window.location.search.includes('banned')) window.history.replaceState(null, '', '/');
+    };
+    show();
+    window.addEventListener(BAN_EVENT, show);
+    return () => window.removeEventListener(BAN_EVENT, show);
+  }, []);
 
   const handleGuest = async () => {
     setLoading(true);
@@ -54,6 +82,41 @@ export default function LandingPage() {
           ))}
         </div>
       </div>
+
+      {/* 🚫 Message de bannissement */}
+      {banNotice && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/70 backdrop-blur-sm p-4" role="alertdialog" aria-modal="true" aria-labelledby="ban-title">
+          <div className="w-full max-w-[420px] rounded-2xl overflow-hidden shadow-[0_20px_60px_rgba(0,0,0,0.7)]"
+            style={{ background: 'rgba(15,15,35,0.98)', border: '1px solid rgba(239,68,68,0.2)' }}>
+            <div className="h-1.5" style={{ background: 'linear-gradient(90deg, #ef4444, #b91c1c, #ef4444)' }} />
+            <div className="p-8 text-center">
+              <div className="text-5xl mb-4">🚫</div>
+              <h2 id="ban-title" className="text-xl font-bold text-white mb-2">Compte suspendu</h2>
+              <div className="p-4 rounded-xl mb-5 space-y-2" style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)' }}>
+                <p className="text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>{banDurationText(banNotice)}</p>
+                {banNotice.reason && (
+                  <p className="text-xs" style={{ color: 'rgba(255,255,255,0.45)' }}>
+                    <span style={{ color: 'rgba(255,255,255,0.3)' }}>Motif :</span> {banNotice.reason}
+                  </p>
+                )}
+                {banNotice.admin_message && (
+                  <p className="text-xs italic pt-2" style={{ color: 'rgba(255,255,255,0.5)', borderTop: '1px solid rgba(239,68,68,0.15)' }}>
+                    💬 {banNotice.admin_message}
+                  </p>
+                )}
+              </div>
+              <button onClick={() => setBanNotice(null)}
+                className="w-full py-3 rounded-xl font-semibold text-white text-sm"
+                style={{ background: 'linear-gradient(135deg, #ef4444, #b91c1c)' }}>
+                J&apos;ai compris
+              </button>
+              <p className="text-[11px] mt-3" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                Pour contester cette décision, contactez le support.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Footer légal */}
       <div className="flex gap-4 mt-8 text-[11px] text-[var(--t3)]">

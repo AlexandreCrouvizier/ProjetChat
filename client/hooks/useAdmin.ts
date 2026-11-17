@@ -44,7 +44,7 @@ export function useAdmin() {
     setError('');
     try {
       const { data } = await api.post('/admin-auth/verify', { code });
-      adminTokenRef.current = data.admin_token;
+      adminTokenRef.current = 'cookie'; // jeton admin en cookie httpOnly
       tokenExpiresRef.current = Date.now() + (data.expires_in * 1000);
       setAuthenticated(true);
       return true;
@@ -61,7 +61,7 @@ export function useAdmin() {
       adminTokenRef.current = null;
       throw new Error('SESSION_EXPIRED');
     }
-    const config = { headers: { 'X-Admin-Token': adminTokenRef.current } };
+    const config = {}; // jeton admin envoyé automatiquement (cookie httpOnly)
     if (method === 'get') return (await api.get(`/admin${url}`, config)).data;
     if (method === 'post') return (await api.post(`/admin${url}`, body, config)).data;
     if (method === 'patch') return (await api.patch(`/admin${url}`, body, config)).data;

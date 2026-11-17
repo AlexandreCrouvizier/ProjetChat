@@ -55,6 +55,7 @@ const ALLOWED = [
   /^\/__nextjs/,         // outils de développement Next.js
   /^\/api\//,            // API (réécrite par Next.js vers le serveur Express)
   /^\/uploads\//,        // images signalées affichées dans le panel
+  /^\/legal(\/|$|\?)/,   // pages légales (lien du bandeau cookies)
   /^\/(favicon\.ico|manifest\.json)$/,
 ];
 const isAllowed = (url) => ALLOWED.some((re) => re.test(url));

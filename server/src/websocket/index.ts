@@ -12,7 +12,8 @@ import { registerMessageHandlers } from './message.handler';
 import { registerGroupHandlers } from './group.handler';
 import { registerReactionHandlers } from './reaction.handler';
 import { registerConversationHandlers } from './conversation.handler';
-import { isBanActive } from '../services/accessRevocation.service';
+import { isBanActive, isAccessRevoked } from '../services/accessRevocation.service';
+import { COOKIE, readCookie } from '../utils/authCookies';
 
 interface AuthenticatedSocket extends Socket {
   user: JwtPayload;
@@ -22,12 +23,15 @@ interface AuthenticatedSocket extends Socket {
 export function setupWebSocket(io: SocketIOServer): void {
   io.use(async (socket, next) => {
     try {
-      const token = socket.handshake.auth?.token;
+      // 🔐 Jeton d'accès lu dans le cookie httpOnly envoyé avec la poignée de main
+      // (ou dans auth.token pour les outils / tests)
+      const token = readCookie(socket.handshake.headers.cookie, COOKIE.access)
+        || (typeof socket.handshake.auth?.token === 'string' ? socket.handshake.auth.token : undefined);
       if (!token) return next(new Error('Token manquant'));
       const payload = verifyAccessToken(token);
       const user = await userRepository.findById(payload.userId);
       if (!user) return next(new Error('Utilisateur introuvable'));
-      if (isBanActive(user)) return next(new Error('Compte suspendu'));
+      if (isBanActive(user) || await isAccessRevoked(user.id)) return next(new Error('Compte suspendu'));
       (socket as AuthenticatedSocket).user = payload;
       (socket as AuthenticatedSocket).userIp = getIpFromSocket(socket);
       next();
