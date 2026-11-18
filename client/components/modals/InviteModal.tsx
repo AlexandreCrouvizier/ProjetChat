@@ -133,7 +133,7 @@ export function InviteModal({ isOpen, groupId, groupName, onClose }: InviteModal
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fadeIn">
       <div ref={modalRef}
-        className="glass-strong rounded-2xl w-[480px] max-h-[85vh] overflow-y-auto shadow-[0_20px_60px_rgba(0,0,0,0.5)] animate-slideUp">
+        className="glass-strong rounded-2xl w-[480px] max-w-[calc(100vw-24px)] max-h-[85dvh] overflow-y-auto shadow-[0_20px_60px_rgba(0,0,0,0.5)] animate-slideUp">
 
         {/* Header */}
         <div className="px-6 py-4 border-b border-[var(--border)] flex items-center justify-between">

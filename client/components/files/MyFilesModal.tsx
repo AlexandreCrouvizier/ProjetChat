@@ -89,7 +89,7 @@ export function MyFilesModal({ isOpen, onClose, mode = 'manage', pickKinds = ['i
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div role="dialog" aria-modal="true" aria-label="Mes fichiers"
-        className="glass-strong rounded-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
+        className="glass-strong rounded-2xl w-full max-w-2xl max-h-[85dvh] flex flex-col overflow-hidden">
 
         {/* En-tête + compteur discret */}
         <div className="px-5 pt-4 pb-3 border-b border-[var(--border)]">

@@ -67,7 +67,7 @@ export function ReportModal({ isOpen, messageId, messageContent, authorName, onC
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fadeIn">
-      <div ref={modalRef} className="glass-strong rounded-2xl w-[440px] max-h-[85vh] overflow-y-auto shadow-[0_20px_60px_rgba(0,0,0,0.5)] animate-slideUp">
+      <div ref={modalRef} className="glass-strong rounded-2xl w-[440px] max-w-[calc(100vw-24px)] max-h-[85dvh] overflow-y-auto shadow-[0_20px_60px_rgba(0,0,0,0.5)] animate-slideUp">
         <div className="px-6 py-4 border-b border-[var(--border)] flex items-center justify-between">
           <h2 className="text-lg font-bold">🚩 Signaler un message</h2>
           <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--t3)] hover:text-[var(--t1)] hover:bg-[var(--glass-h)] transition-all text-sm">✕</button>

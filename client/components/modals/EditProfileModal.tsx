@@ -11,6 +11,8 @@ const AVATAR_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
 const AVATAR_MAX_BYTES = 5 * 1024 * 1024; // 5 Mo (le serveur le réduit en 256×256)
 import { useAuthStore } from '@/stores/authStore';
 import { useGifConfig, invalidateGifConfigCache } from '@/hooks/useGifConfig';
+import { LayoutPicker } from '@/components/layout/LayoutPicker';
+import { useLayoutStore } from '@/hooks/useMobileLayout';
 
 interface EditProfileModalProps { isOpen: boolean; onClose: () => void; /** Ouvre la galerie « Mes fichiers » */ onOpenFiles?: () => void; }
 
@@ -46,6 +48,8 @@ export function EditProfileModal({ isOpen, onClose, onOpenFiles }: EditProfileMo
   const [saving, setSaving] = useState(false);
   const [gifDisplay, setGifDisplay] = useState(null as 'auto' | 'click' | null);
   const gifConfig = useGifConfig();
+  const layoutRule = useLayoutStore((st) => st.rule);
+  const isGuest = user?.tier === 'guest';
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -144,7 +148,7 @@ export function EditProfileModal({ isOpen, onClose, onOpenFiles }: EditProfileMo
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fadeIn">
-      <div ref={modalRef} className="glass-strong rounded-2xl w-[420px] max-h-[85vh] overflow-y-auto shadow-[0_20px_60px_rgba(0,0,0,0.5)] animate-slideUp">
+      <div ref={modalRef} className="glass-strong rounded-2xl w-[420px] max-w-[calc(100vw-24px)] max-h-[85dvh] overflow-y-auto shadow-[0_20px_60px_rgba(0,0,0,0.5)] animate-slideUp">
         <div className="px-6 py-4 border-b border-[var(--border)] flex items-center justify-between">
           <h2 className="text-lg font-bold">Modifier le profil</h2>
           <button onClick={onClose} className="w-7 h-7 rounded-lg flex items-center justify-center text-[var(--t3)] hover:text-[var(--t1)] hover:bg-[var(--glass-h)] transition-all text-sm">✕</button>
@@ -292,6 +296,16 @@ export function EditProfileModal({ isOpen, onClose, onOpenFiles }: EditProfileMo
             );
           })()}
 
+          {/* 📱 Disposition sur téléphone — visible seulement si l'admin laisse le choix (enregistrée tout de suite) */}
+          {layoutRule === 'option' && (
+            <div className="mb-5 pt-4 border-t border-[var(--border)]" data-testid="profile-layout">
+              <label className="block text-[9px] font-semibold text-[var(--t3)] uppercase tracking-wider mb-2">
+                📱 Affichage sur téléphone
+              </label>
+              <LayoutPicker />
+            </div>
+          )}
+
           {/* 🛰️ Métadonnées des photos — visible seulement si l'admin laisse le choix */}
           {storage?.metadata_mode === 'option' && (
             <div className="mb-5 pt-4 border-t border-[var(--border)]">
@@ -324,10 +338,15 @@ export function EditProfileModal({ isOpen, onClose, onOpenFiles }: EditProfileMo
             </div>
           )}
 
+          {isGuest && (
+            <p className="mb-3 text-[11px] text-[var(--t3)]">👤 Compte invité : créez un compte pour modifier votre pseudo, votre avatar et votre bio.</p>
+          )}
+
           {/* Boutons */}
           <div className="flex gap-2">
             <button onClick={onClose} className="flex-1 py-2.5 rounded-xl font-semibold text-sm border border-[var(--border)] text-[var(--t2)] hover:bg-[var(--glass-h)] transition-all">Annuler</button>
-            <button onClick={handleSave} disabled={saving || !username.trim()}
+            <button onClick={handleSave} disabled={saving || !username.trim() || isGuest}
+              title={isGuest ? 'Créez un compte pour modifier votre profil' : undefined}
               className="flex-1 py-2.5 rounded-xl font-semibold text-white text-sm bg-gradient-to-r from-purple-500 to-indigo-500 shadow-[0_0_16px_var(--acc-g)] hover:brightness-110 transition-all disabled:opacity-50">
               {saving ? '⏳ Sauvegarde...' : 'Sauvegarder'}
             </button>

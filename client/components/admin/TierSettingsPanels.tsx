@@ -2,6 +2,7 @@
 /**
  * components/admin/TierSettingsPanels.tsx — Réglages par type de compte (Panel → Paramètres)
  *
+ *   - Disposition sur téléphone (Pile d'écrans / Onglets / Tiroirs / Option), par type de compte
  *   - Métadonnées des images envoyées (Supprimées / Conservées / Option), par type de compte
  *   - Historique visible à l'arrivée dans un salon (Tout / N avant l'arrivée / N derniers)
  *   - Délai entre deux messages + messages maximum par minute dans un salon
@@ -63,6 +64,13 @@ function formatMb(mb: number): string {
   if (mb === 0) return 'Aucun envoi';
   return mb >= 1024 ? `${(mb / 1024).toLocaleString('fr-FR', { maximumFractionDigits: 1 })} Go` : `${mb} Mo`;
 }
+
+const LAYOUT_CHOICES: { v: string; desc: string; hint: string }[] = [
+  { v: 'stack', desc: "📚 Pile d'écrans", hint: '→ Liste des salons, puis discussion en plein écran (bouton ← et geste « retour » du téléphone)' },
+  { v: 'tabs', desc: '🗂️ Onglets en bas', hint: '→ Salons · Messages · Discussion · Moi, toujours à portée de pouce (masqués quand le clavier est ouvert)' },
+  { v: 'drawers', desc: '↔️ Tiroirs', hint: '→ Discussion en plein écran ; ☰ ouvre les salons à gauche, 👥 les membres à droite' },
+  { v: 'option', desc: '⚙️ Option', hint: "→ Chaque membre choisit dans son profil (pile d'écrans par défaut)" },
+];
 
 const DELETE_CHOICES: { v: string; desc: string; hint: string }[] = [
   { v: 'gallery_only', desc: '🙈 Galerie seulement', hint: '→ Retiré de sa galerie uniquement : l\'image reste visible dans les messages et continue de compter dans son quota' },
@@ -200,6 +208,38 @@ export function TierSettingsPanels({ getSetting, updateSetting, settingsDirty, s
 
   return (
     <>
+      {/* ═════════════ Disposition sur téléphone, par type de compte ═════════════ */}
+      <div className={card} style={cardStyle} data-testid="mobile-layout-card">
+        <Header icon="📱" title="Affichage sur téléphone"
+          subtitle="Disposition de l'écran sur téléphone et tablette en portrait (le grand écran garde ses trois colonnes)"
+          help={<>
+            <p><b>📚 Pile d&apos;écrans</b> : comme la plupart des messageries. La liste des salons et des messages privés s&apos;affiche d&apos;abord ; un appui ouvre la discussion en plein écran, le bouton ← ou le geste « retour » du téléphone ramène à la liste. En paysage et sur tablette, la liste et la discussion sont côte à côte.</p>
+            <p><b>🗂️ Onglets en bas</b> : quatre onglets (Salons, Messages, Discussion, Moi). L&apos;onglet « Moi » regroupe le profil, Mes fichiers, le thème et la déconnexion. La barre d&apos;onglets disparaît quand le clavier est ouvert ; en paysage, elle passe sur le côté gauche.</p>
+            <p><b>↔️ Tiroirs</b> : la discussion occupe tout l&apos;écran ; ☰ fait glisser les salons depuis la gauche, 👥 les membres depuis la droite.</p>
+            <p><b>⚙️ Option</b> : chaque membre choisit dans « Modifier le profil » (et dans l&apos;onglet « Moi »). Son choix est enregistré sur son compte et le suit sur tous ses appareils. Sans choix : pile d&apos;écrans.</p>
+          </>} />
+        {TIER_ROWS.map(({ tier, label }) => {
+          const key = `mobile_layout_${tier}`;
+          const val = getSetting(key) || (tier === 'guest' ? 'stack' : 'option');
+          return (
+            <div key={tier} className="space-y-1.5">
+              <p className="text-[12px] font-medium text-white">{label}</p>
+              <div className="grid grid-cols-4 gap-2">
+                {LAYOUT_CHOICES.map(({ v, desc }) => (
+                  <button key={v} onClick={() => updateSetting(key, v)} data-testid={`${key}-${v}`}
+                    className="py-2 rounded-lg text-[11px] font-medium transition-all"
+                    style={choiceStyle(val === v)}>
+                    {desc}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px]" style={faint}>{LAYOUT_CHOICES.find((c) => c.v === val)?.hint}</p>
+            </div>
+          );
+        })}
+        <SaveButton show={dirty(['mobile_layout_'])} saving={settingsSaving} onSave={saveSettings} />
+      </div>
+
       {/* ═════════════ Métadonnées des images, par type de compte ═════════════ */}
       <div className={card} style={cardStyle}>
         <Header icon="🛰️" title="Métadonnées des images envoyées"

@@ -52,3 +52,7 @@ coverage/
 # Documents de travail locaux (non publiés)
 docs/
 outils-tests/
+
+# Documents du projet (Markdown a la racine : SECURITE, AMELIORATIONS, BILAN, README...) :
+# uniquement en local, jamais sur Git (le depot GitHub est public). Seul le code est publie.
+/*.md

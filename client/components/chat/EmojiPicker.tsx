@@ -77,7 +77,7 @@ export function EmojiPicker({ onSelect }: EmojiPickerProps) {
 
       {/* Picker popup */}
       {isOpen && (
-        <div className="absolute bottom-12 right-0 w-[320px] glass-strong rounded-2xl shadow-[0_12px_48px_rgba(0,0,0,0.4)] overflow-hidden z-50 animate-slideUp">
+        <div className="absolute bottom-12 right-0 w-[320px] max-w-[calc(100vw-24px)] glass-strong rounded-2xl shadow-[0_12px_48px_rgba(0,0,0,0.4)] overflow-hidden z-50 animate-slideUp">
           
           {/* Onglets catégories */}
           <div className="flex border-b border-[var(--border)] px-2 py-1.5 gap-1 overflow-x-auto">

@@ -31,7 +31,7 @@ export function DMList({ conversations, activeConvId, onSelect, onHide }: DMList
         return (
           <div key={conv.id} className="relative group/dm">
             <button onClick={() => onSelect(conv)}
-              className={`w-full flex items-center gap-2.5 px-3 py-2 mx-2 rounded-lg text-sm transition-all border border-transparent pr-8
+              className={`w-full flex items-center gap-2.5 px-3 py-2 [@media(pointer:coarse)]:py-3 [@media(pointer:coarse)]:pr-12 mx-2 rounded-lg text-sm transition-all border border-transparent pr-8
                 ${activeConvId === conv.id ? 'bg-[var(--glass-a)] border-[rgba(139,92,246,0.2)] text-[var(--t1)]' : 'text-[var(--t2)] hover:bg-[var(--glass-h)] hover:border-[var(--border)] hover:text-[var(--t1)]'}`}>
               <div className={`w-7 h-7 rounded-full bg-gradient-to-br ${color} flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0 relative`}>
                 {initial}
@@ -53,8 +53,8 @@ export function DMList({ conversations, activeConvId, onSelect, onHide }: DMList
             </button>
             {/* ⭐ Masquer (pas supprimer — la conv réapparaîtra si l'autre écrit) */}
             <button onClick={(e) => { e.stopPropagation(); onHide(conv.id); }}
-              className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-md flex items-center justify-center text-[10px] text-[var(--t3)] hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover/dm:opacity-100"
-              title="Masquer la conversation">
+              className="absolute right-3 top-1/2 -translate-y-1/2 w-5 h-5 rounded-md flex items-center justify-center text-[10px] text-[var(--t3)] hover:text-red-400 hover:bg-red-500/10 transition-all opacity-0 group-hover/dm:opacity-100 [@media(hover:none)]:opacity-60 [@media(pointer:coarse)]:w-9 [@media(pointer:coarse)]:h-9"
+              title="Masquer la conversation" aria-label="Masquer la conversation">
               ✕
             </button>
           </div>

@@ -16,9 +16,16 @@ interface SidebarProps {
   onSelectGroup: (g: Group) => void; onSelectConv: (c: Conversation) => void;
   onHideConv: (convId: string) => void; onLeaveGroup: (groupId: string) => void;
   onLogout: () => void; onEditProfile?: () => void; onCreateGroup?: () => void;
+  /** Classes de taille/placement (par défaut : colonne de 250 px) — plein écran, tiroir, largeur réglable… */
+  className?: string; style?: React.CSSProperties;
+  /** Sections affichées (disposition « Onglets » : salons et messages privés dans deux onglets) */
+  sections?: 'all' | 'groups' | 'dms';
+  /** Carte du profil en bas (masquée dans l'onglet « Moi ») */
+  showFooter?: boolean;
 }
 
-export function Sidebar({ user, groups, conversations, activeGroupId, activeConvId, onSelectGroup, onSelectConv, onHideConv, onLeaveGroup, onLogout, onEditProfile, onCreateGroup }: SidebarProps) {
+export function Sidebar({ user, groups, conversations, activeGroupId, activeConvId, onSelectGroup, onSelectConv, onHideConv, onLeaveGroup, onLogout, onEditProfile, onCreateGroup, className, style, sections = 'all', showFooter = true }: SidebarProps) {
+  const showGroups = sections !== 'dms', showDms = sections !== 'groups';
   const { theme, toggleTheme } = useTheme();
   const [contextMenu, setContextMenu] = useState<{ groupId: string; x: number; y: number } | null>(null);
   const initial = user?.username?.charAt(0).toUpperCase() || '?';
@@ -32,8 +39,8 @@ export function Sidebar({ user, groups, conversations, activeGroupId, activeConv
   };
 
   return (
-    <div className="w-[250px] glass-strong rounded-2xl flex flex-col overflow-hidden flex-shrink-0"
-      onClick={() => setContextMenu(null)}>
+    <div className={`${className ?? 'w-[250px] flex-shrink-0'} glass-strong rounded-2xl flex flex-col overflow-hidden`} style={style}
+      data-testid="sidebar" onClick={() => setContextMenu(null)}>
       <div className="px-4 py-4 border-b border-[var(--border)] flex items-center justify-between">
         <div className="flex items-center gap-2.5">
           <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-[var(--acc)] to-indigo-500 flex items-center justify-center text-sm shadow-[0_0_16px_var(--acc-g)]">💬</div>
@@ -53,13 +60,14 @@ export function Sidebar({ user, groups, conversations, activeGroupId, activeConv
       </div>
 
       <div className="flex-1 overflow-y-auto px-1 py-1">
+        {showGroups && (<>
         {/* ⭐ Header salons avec bouton + */}
         <div className="px-3 pt-3 pb-1.5 flex items-center justify-between">
           <span className="text-[9px] font-semibold text-[var(--t3)] uppercase tracking-[.12em]">Salons</span>
           {user?.tier !== 'guest' && (
             <button onClick={onCreateGroup}
-              className="w-5 h-5 rounded-md flex items-center justify-center text-[var(--t3)] hover:text-[var(--acc)] hover:bg-[var(--acc-s)] transition-all text-xs"
-              title="Créer un salon">
+              className="w-5 h-5 [@media(pointer:coarse)]:w-9 [@media(pointer:coarse)]:h-9 [@media(pointer:coarse)]:text-base rounded-md flex items-center justify-center text-[var(--t3)] hover:text-[var(--acc)] hover:bg-[var(--acc-s)] transition-all text-xs"
+              title="Créer un salon" aria-label="Créer un salon">
               +
             </button>
           )}
@@ -69,7 +77,7 @@ export function Sidebar({ user, groups, conversations, activeGroupId, activeConv
           <button key={group.id}
             onClick={() => onSelectGroup(group)}
             onContextMenu={(e) => !group.is_official && handleContextMenu(e, group.id)}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 mx-2 rounded-lg text-sm transition-all border border-transparent
+            className={`w-full flex items-center gap-2.5 px-3 py-2 [@media(pointer:coarse)]:py-3 [@media(pointer:coarse)]:text-[15px] mx-2 rounded-lg text-sm transition-all border border-transparent
               ${activeGroupId === group.id && !activeConvId ? 'bg-[var(--glass-a)] border-[rgba(139,92,246,0.2)] text-[var(--t1)] shadow-[0_0_20px_rgba(139,92,246,0.06)]' : 'text-[var(--t2)] hover:bg-[var(--glass-h)] hover:border-[var(--border)] hover:text-[var(--t1)]'}`}>
             <span className="text-base font-bold w-[22px] text-center" style={{ textShadow: '0 0 12px var(--acc-g)' }}>
               {group.type === 'private' ? '🔒' : <span className="text-[var(--hash)]">#</span>}
@@ -78,15 +86,18 @@ export function Sidebar({ user, groups, conversations, activeGroupId, activeConv
             {group.member_count > 0 && <span className="text-[10px] text-[var(--t3)]">{group.member_count}</span>}
           </button>
         ))}
+        </>)}
 
-        <div className="px-3 pt-5 pb-1.5 text-[9px] font-semibold text-[var(--t3)] uppercase tracking-[.12em] flex items-center gap-2">
+        {showDms && (<>
+        <div className={`px-3 ${showGroups ? 'pt-5' : 'pt-3'} pb-1.5 text-[9px] font-semibold text-[var(--t3)] uppercase tracking-[.12em] flex items-center gap-2`}>
           Messages privés {totalUnread > 0 && <span className="bg-[var(--acc)] text-white text-[8px] font-bold px-1.5 py-px rounded-full">{totalUnread}</span>}
         </div>
         <DMList conversations={conversations} activeConvId={activeConvId} onSelect={onSelectConv} onHide={onHideConv} />
+        </>)}
       </div>
 
       {/* Profil */}
-      <div className="px-3 py-3 border-t border-[var(--border)] flex items-center gap-2.5">
+      {showFooter && <div className="px-3 py-3 border-t border-[var(--border)] flex items-center gap-2.5">
         <div onClick={onEditProfile} className={`w-9 h-9 rounded-[10px] bg-gradient-to-br ${avatarGradient} flex items-center justify-center text-[15px] font-bold text-white shadow-[0_4px_12px_rgba(0,0,0,0.25)] relative cursor-pointer hover:scale-105 transition-transform`}>
           {safeAvatarUrl(user?.avatar_url) ? <img src={safeAvatarUrl(user?.avatar_url)!} alt="" className="w-full h-full rounded-[10px] object-cover" /> : initial}
           <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full bg-[var(--on)] border-[2.5px] border-[var(--bg)] shadow-[0_0_8px_var(--on-g)]" />
@@ -95,8 +106,8 @@ export function Sidebar({ user, groups, conversations, activeGroupId, activeConv
           <div className="text-[13px] font-semibold truncate">{user?.username || 'Invité'}</div>
           <div className="text-[10px] text-[var(--t3)]">{user?.tier === 'premium' ? '⭐ Premium' : user?.tier === 'guest' ? '👤 Invité' : '🟢 En ligne'}</div>
         </div>
-        <button onClick={onLogout} className="text-[var(--t3)] hover:text-red-400 transition-colors text-sm" title="Se déconnecter">🚪</button>
-      </div>
+        <button onClick={onLogout} className="text-[var(--t3)] hover:text-red-400 transition-colors text-sm [@media(pointer:coarse)]:w-11 [@media(pointer:coarse)]:h-11" title="Se déconnecter" aria-label="Se déconnecter">🚪</button>
+      </div>}
 
       {/* ⭐ Menu contextuel (clic droit) sur un salon */}
       {contextMenu && (

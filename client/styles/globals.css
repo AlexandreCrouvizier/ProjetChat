@@ -89,6 +89,17 @@ body { background: var(--bg); color: var(--t1); font-family: 'Sora Variable', 'S
 .animate-fadeIn { animation: fadeIn 0.2s ease-out; }
 .animate-scaleIn { animation: scaleIn 0.3s ease-out; }
 
+/* ===== DISPOSITION MOBILE (tiroirs, volet des membres, écran bord à bord) ===== */
+@keyframes drawerLeft { from{transform:translateX(-100%)} to{transform:translateX(0)} }
+@keyframes drawerRight { from{transform:translateX(100%)} to{transform:translateX(0)} }
+@keyframes sheetUp { from{transform:translateY(100%)} to{transform:translateY(0)} }
+.anim-drawer-left { animation: drawerLeft 0.22s ease-out; }
+.anim-drawer-right { animation: drawerRight 0.22s ease-out; }
+.anim-sheet-up { animation: sheetUp 0.25s ease-out; }
+@media (prefers-reduced-motion: reduce) { .anim-drawer-left, .anim-drawer-right, .anim-sheet-up { animation: none; } }
+/* Panneau collé aux bords de l'écran (téléphone) : ni coins arrondis, ni bordure, ni ombre */
+.edge-to-edge { border-radius: 0 !important; border: 0 !important; box-shadow: none !important; }
+
 /* ===== SCROLLBAR ===== */
 ::-webkit-scrollbar { width: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }

@@ -22,6 +22,10 @@ const avatarUpload = multer({ storage: multer.memoryStorage(), limits: { fileSiz
 // Recherche pour autocomplete @mention
 router.get('/search', requireAuth, usersController.search);
 
+// Disposition sur téléphone (tous les types de compte : un invité peut aussi choisir si l'admin le permet)
+router.get('/me/layout', requireAuth, profileController.getLayout);
+router.patch('/me/layout', requireAuth, rateLimit({ name: 'layout', max: 30, windowSeconds: 60, by: 'user' }), profileController.updateLayout);
+
 // Mon profil
 router.patch('/me', requireAuth, requireTier('registered', 'premium'), profileController.updateProfile);
 // 🔐 Avatar = fichier image (5 Mo max), traité par Sharp. L'ancien PATCH (base64 / URL externe) est supprimé.

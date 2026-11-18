@@ -499,6 +499,8 @@ export const authService = {
       bio: user.bio || null,
       donor_badge: user.donor_badge,
       theme: user.theme,
+      // 🐛 Préférence GIF : n'était pas renvoyée, elle semblait perdue après chaque rechargement
+      gif_display: user.gif_display ?? null,
     };
   },
 };

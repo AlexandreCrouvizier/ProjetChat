@@ -39,6 +39,8 @@ interface MembersPanelProps {
   groupType?: string;
   groupName?: string;
   onMemberClick: (userId: string) => void;
+  /** Classes de taille/placement (par défaut : colonne de 200 px) — volet, tiroir, largeur réglable… */
+  className?: string; style?: React.CSSProperties;
 }
 
 const ROLE_LABELS:    Record<string, string> = { creator: '👑 Créateur', admin: '🛡️ Admin', moderator: '🔧 Modérateur', member: '' };
@@ -59,7 +61,7 @@ function timeAgo(dateStr: string): string {
   return `il y a ${Math.floor(h / 24)}j`;
 }
 
-export function MembersPanel({ groupId, groupType, groupName, onMemberClick }: MembersPanelProps) {
+export function MembersPanel({ groupId, groupType, groupName, onMemberClick, className, style }: MembersPanelProps) {
   const { user } = useAuth();
   const [members,     setMembers]     = useState<Member[]>([]);
   const [onlineIds,   setOnlineIds]   = useState<Set<string>>(new Set());
@@ -267,8 +269,8 @@ export function MembersPanel({ groupId, groupType, groupName, onMemberClick }: M
 
   // ─── Rendu principal ───────────────────────────────────────────────────────
   return (
-    <div className="w-[200px] glass-strong rounded-2xl flex flex-col overflow-hidden flex-shrink-0"
-      onClick={() => setContextMenu(null)}>
+    <div className={`${className ?? 'w-[200px] flex-shrink-0'} glass-strong rounded-2xl flex flex-col overflow-hidden`} style={style}
+      data-testid="members-panel" onClick={() => setContextMenu(null)}>
 
       {/* ── Header ────────────────────────────────────────────────────────── */}
       <div className="px-4 py-3 border-b border-[var(--border)]">

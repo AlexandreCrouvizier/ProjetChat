@@ -6,8 +6,57 @@ import { userRepository } from '../repositories/user.repository';
 import { VALIDATION } from '../../../shared/constants';
 import { uploadService, InvalidImageError, QuotaExceededError } from '../services/upload.service';
 import { getIpFromRequest } from '../utils/ip';
+import { db } from '../config/database';
+import { settingsService, MOBILE_LAYOUTS, DEFAULT_MOBILE_LAYOUT, type MobileLayout } from '../services/settings.service';
+
+/** Disposition sur téléphone d'un compte : règle de son type de compte + son choix (s'il a le droit de choisir) */
+async function layoutFor(userId: string) {
+  const row = await db('users').where({ id: userId }).first('tier', 'mobile_layout');
+  if (!row) return null;
+  const rule = (await settingsService.forTier(row.tier)).mobileLayout;
+  const preference: MobileLayout | null = MOBILE_LAYOUTS.includes(row.mobile_layout) ? row.mobile_layout : null;
+  const effective: MobileLayout = rule === 'option' ? (preference ?? DEFAULT_MOBILE_LAYOUT) : rule;
+  return { rule, preference, effective, choices: MOBILE_LAYOUTS };
+}
 
 export const profileController = {
+
+  /** GET /api/users/me/layout — disposition sur téléphone (tous les types de compte, invités compris) */
+  async getLayout(req: Request, res: Response): Promise<void> {
+    try {
+      const layout = await layoutFor(req.user!.userId);
+      if (!layout) { res.status(404).json({ error: 'NOT_FOUND' }); return; }
+      res.json(layout);
+    } catch (error: any) {
+      console.error('❌ getLayout:', error);
+      res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Erreur serveur' });
+    }
+  },
+
+  /**
+   * PATCH /api/users/me/layout — { mobile_layout: 'stack' | 'tabs' | 'drawers' | null }
+   * 🔐 Choix fermé ; refusé (403) quand l'admin impose la disposition de ce type de compte.
+   */
+  async updateLayout(req: Request, res: Response): Promise<void> {
+    try {
+      const value = req.body?.mobile_layout;
+      if (value !== null && !MOBILE_LAYOUTS.includes(value)) {
+        res.status(400).json({ error: 'VALIDATION_ERROR', message: `Disposition invalide (${MOBILE_LAYOUTS.join(' | ')} ou null)`, field: 'mobile_layout' });
+        return;
+      }
+      const current = await layoutFor(req.user!.userId);
+      if (!current) { res.status(404).json({ error: 'NOT_FOUND' }); return; }
+      if (current.rule !== 'option') {
+        res.status(403).json({ error: 'LAYOUT_LOCKED', message: "La disposition est choisie par l'administrateur pour votre type de compte" });
+        return;
+      }
+      await db('users').where({ id: req.user!.userId }).update({ mobile_layout: value });
+      res.json(await layoutFor(req.user!.userId));
+    } catch (error: any) {
+      console.error('❌ updateLayout:', error);
+      res.status(500).json({ error: 'INTERNAL_ERROR', message: 'Erreur serveur' });
+    }
+  },
 
   /** PATCH /api/users/me */
   async updateProfile(req: Request, res: Response): Promise<void> {

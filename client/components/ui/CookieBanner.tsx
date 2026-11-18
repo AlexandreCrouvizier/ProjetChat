@@ -48,8 +48,9 @@ export function CookieBanner() {
 
   if (!visible) return null;
 
+  // Téléphone / tablette en portrait : en haut, pour ne jamais recouvrir la barre de saisie (ni le clavier)
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-50 p-4 animate-slideUp">
+    <div className="fixed top-0 min-[900px]:top-auto min-[900px]:bottom-0 left-0 right-0 z-[70] p-3 min-[900px]:p-4 animate-slideUp" data-testid="cookie-banner">
       <div className="max-w-3xl mx-auto glass-strong rounded-2xl p-5 shadow-[0_-8px_40px_rgba(0,0,0,0.3)]">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
           

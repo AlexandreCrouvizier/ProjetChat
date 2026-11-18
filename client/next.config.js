@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const os = require('os');
 
-// 🔐 Adresses IPv4 privées de ce PC (ex. 192.168.1.102).
+// 🔐 Adresses IPv4 privées de ce PC (ex. 192.168.x.y).
 // Next.js 16 bloque par défaut les ressources de développement (rechargement à chaud)
 // pour tout autre hôte que localhost : on autorise uniquement les adresses du PC lui-même,
 // pour que le téléphone / la tablette du réseau local fonctionnent avec `npm run dev:lan`.
@@ -45,6 +45,10 @@ const nextConfig = {
     }
     return [{ source: '/:path*', headers: security }];
   },
+
+  // Badge « N » de Next.js en mode développement : masqué (en bas à gauche, il recouvrait l'onglet « Salons »
+  // sur téléphone). Les erreurs de compilation restent affichées en plein écran.
+  devIndicators: false,
 
   // Ne pas annoncer « X-Powered-By: Next.js »
   poweredByHeader: false,

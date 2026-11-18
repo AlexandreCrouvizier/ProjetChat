@@ -27,6 +27,19 @@ export type DeleteMode = 'gallery_only' | 'erase' | 'erase_messages' | 'block' |
 export const DELETE_MODES: DeleteMode[] = ['gallery_only', 'erase', 'erase_messages', 'block', 'option'];
 export const MEMBER_DELETE_CHOICES: DeleteMode[] = ['gallery_only', 'erase', 'erase_messages'];
 
+/**
+ * Disposition de l'écran sur téléphone / tablette en portrait (aucun effet sur un grand écran) :
+ *   stack   : pile d'écrans (liste des salons → discussion plein écran)
+ *   tabs    : onglets en bas (Salons · Messages · Discussion · Moi)
+ *   drawers : tiroirs latéraux (discussion plein écran, salons à gauche, membres à droite)
+ *   option  : le membre choisit dans son profil (users.mobile_layout ; pile d'écrans par défaut)
+ */
+export type MobileLayout = 'stack' | 'tabs' | 'drawers';
+export type MobileLayoutRule = MobileLayout | 'option';
+export const MOBILE_LAYOUTS: MobileLayout[] = ['stack', 'tabs', 'drawers'];
+export const MOBILE_LAYOUT_RULES: MobileLayoutRule[] = [...MOBILE_LAYOUTS, 'option'];
+export const DEFAULT_MOBILE_LAYOUT: MobileLayout = 'stack';
+
 /** Bornes de sécurité des réglages numériques */
 export const SETTING_BOUNDS = {
   history_limit: { min: 0, max: 100000 },
@@ -51,6 +64,8 @@ export interface TierSettings {
   deleteMode: DeleteMode;
   /** Durée de conservation des fichiers en jours (0 = sans limite) */
   uploadExpiryDays: number;
+  /** Disposition sur téléphone imposée, ou « option » (choix du membre) */
+  mobileLayout: MobileLayoutRule;
 }
 
 let cache: Record<string, string> | null = null;
@@ -107,6 +122,9 @@ export const settingsService = {
       // Valeur inconnue : 0 (rien n'expire : aucun fichier n'est effacé par erreur)
       uploadExpiryDays: tier === 'guest' ? 0
         : intIn(s[`upload_expiry_days_${tier}`], SETTING_BOUNDS.upload_expiry_days.min, SETTING_BOUNDS.upload_expiry_days.max, 0),
+      // Valeur inconnue : pile d'écrans (la disposition par défaut)
+      mobileLayout: MOBILE_LAYOUT_RULES.includes(s[`mobile_layout_${tier}`] as MobileLayoutRule)
+        ? (s[`mobile_layout_${tier}`] as MobileLayoutRule) : DEFAULT_MOBILE_LAYOUT,
     };
   },
 
@@ -141,6 +159,7 @@ export function validateSettingUpdate(key: string, raw: unknown): { ok: true; va
   if (/^storage_quota_mb_(registered|premium)$/.test(key)) return integer(SETTING_BOUNDS.storage_quota_mb.min, SETTING_BOUNDS.storage_quota_mb.max);
   if (/^upload_delete_mode_(registered|premium)$/.test(key)) return choice([...DELETE_MODES]);
   if (/^upload_expiry_days_(registered|premium)$/.test(key)) return integer(SETTING_BOUNDS.upload_expiry_days.min, SETTING_BOUNDS.upload_expiry_days.max);
+  if (/^mobile_layout_(guest|registered|premium)$/.test(key)) return choice([...MOBILE_LAYOUT_RULES]);
   if (key === 'lcen_retention_days') return integer(SETTING_BOUNDS.lcen_retention_days.min, SETTING_BOUNDS.lcen_retention_days.max);
   return { ok: true, value };
 }

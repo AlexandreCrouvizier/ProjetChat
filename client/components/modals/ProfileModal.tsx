@@ -150,7 +150,7 @@ export function ProfileModal({ userId, currentUserId, currentUserTier, isOpen, o
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm animate-fadeIn">
-      <div ref={modalRef} className="glass-strong rounded-2xl w-[340px] max-h-[90vh] overflow-y-auto shadow-[0_20px_60px_rgba(0,0,0,0.5)] animate-slideUp">
+      <div ref={modalRef} className="glass-strong rounded-2xl w-[340px] max-w-[calc(100vw-24px)] max-h-[90dvh] overflow-y-auto shadow-[0_20px_60px_rgba(0,0,0,0.5)] animate-slideUp">
         {/* Bannière */}
         <div className="h-[90px] bg-gradient-to-r from-[var(--acc)] to-indigo-500 relative">
           <button onClick={onClose} className="absolute top-2.5 right-2.5 w-7 h-7 rounded-full bg-black/20 backdrop-blur-sm text-white/70 hover:text-white hover:bg-black/30 transition-all flex items-center justify-center text-sm">✕</button>

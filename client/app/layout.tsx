@@ -7,7 +7,7 @@
  */
 
 import { AppModalProvider } from '@/components/ui/AppModal';
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import { headers } from 'next/headers';
 // 🔐 Police hébergée par ChatApp (plus d'appel à Google Fonts : RGPD + CSP stricte)
 import '@fontsource-variable/sora';
@@ -20,6 +20,14 @@ export const metadata: Metadata = {
   title: 'ChatApp — Chat en ligne',
   description: 'Application de chat communautaire en temps réel',
   manifest: '/manifest.json',
+};
+
+// Téléphone : largeur de l'appareil, et le clavier virtuel réduit la page (la barre de saisie reste au-dessus du clavier)
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  interactiveWidget: 'resizes-content',
+  themeColor: '#080818',
 };
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {

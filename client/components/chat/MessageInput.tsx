@@ -97,7 +97,8 @@ export function MessageInput({
 
   // Auto-focus au changement de canal
   useEffect(() => {
-    if (!disabled) setTimeout(() => inputRef.current?.focus(), 200);
+    // Écran tactile : pas de focus automatique (le clavier s'ouvrirait tout seul à chaque changement de salon)
+    if (!disabled && !window.matchMedia('(pointer: coarse)').matches) setTimeout(() => inputRef.current?.focus(), 200);
   }, [channelName, disabled]);
 
   // Nettoyer l'object URL quand staged change
@@ -479,7 +480,7 @@ export function MessageInput({
                           `Envoyer un message dans #${channelName}`
           }
           disabled={disabled || uploading} maxLength={4000}
-          className="flex-1 py-2 px-1.5 bg-transparent text-[13px] text-[var(--t1)] outline-none placeholder:text-[var(--t3)] disabled:cursor-not-allowed"
+          className="flex-1 min-w-0 py-2 px-1.5 bg-transparent text-[13px] [@media(pointer:coarse)]:text-[16px] text-[var(--t1)] outline-none placeholder:text-[var(--t3)] disabled:cursor-not-allowed"
         />
 
         <EmojiPicker onSelect={handleEmojiSelect} />
