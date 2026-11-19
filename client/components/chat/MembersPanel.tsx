@@ -18,6 +18,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import api from '@/lib/api';
 import { getSocket } from '@/lib/socket';
 import { useAuth } from '@/hooks/useAuth';
+import { VoiceButtons } from '@/components/chat/VoiceButtons';
 import { InviteModal } from '@/components/modals/InviteModal';
 import { showModal } from '@/components/ui/AppModal';
 import { safeAvatarUrl } from '@/lib/safeUrl';
@@ -260,6 +261,10 @@ export function MembersPanel({ groupId, groupType, groupName, onMemberClick, cla
           }
         </div>
 
+        {isOnline && member.id !== user?.id && groupId && (
+          <VoiceButtons where="member" kind={groupType === 'private' ? 'private' : 'public'} groupId={groupId} targetName={member.username} label={groupName ? `#${groupName}` : undefined}
+            btnClass="w-6 h-6 rounded-md flex items-center justify-center text-[var(--t2)] hover:bg-[var(--glass-h)]" />
+        )}
         {isGuest && !ROLE_LABELS[member.role] && (
           <span className="text-[7px] font-bold px-1.5 py-0.5 rounded bg-[var(--badge-g)] text-[var(--t3)] flex-shrink-0">INV</span>
         )}

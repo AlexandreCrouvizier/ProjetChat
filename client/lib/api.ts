@@ -99,6 +99,22 @@ export async function uploadFile(file: File): Promise<{ url: string; filename: s
   return postFile('/api/upload/file', file, 'Erreur upload fichier');
 }
 
+/** 🎤 Message vocal : enregistrement + durée (le serveur vérifie le format, la durée, le quota) */
+export async function uploadAudio(blob: Blob, durationMs: number): Promise<{ url: string; duration_ms: number; size: number }> {
+  const ext = /ogg/.test(blob.type) ? 'ogg' : /mp4|aac|m4a/.test(blob.type) ? 'm4a' : 'webm';
+  const send = () => {
+    const formData = new FormData();
+    formData.append('duration_ms', String(Math.round(durationMs)));
+    formData.append('audio', blob, `vocal.${ext}`);
+    return fetch('/api/upload/audio', { method: 'POST', body: formData, credentials: 'same-origin' });
+  };
+  let res = await send();
+  if (res.status === 401 && await refreshSession()) res = await send();
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.message || data.error || 'Envoi du message vocal impossible');
+  return data;
+}
+
 // 🔐 Avatar envoyé en fichier : le serveur le vérifie et le convertit en WebP 256×256
 export async function uploadAvatar(file: File): Promise<{ avatar_url: string }> {
   return postFile('/api/users/me/avatar', file, 'Erreur lors de l\'envoi de l\'avatar');

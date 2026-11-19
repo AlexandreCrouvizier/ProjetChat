@@ -172,6 +172,7 @@ export const messageRepository = {
     file_url?: string;
     gif_url?: string;
     link_preview?: object | null;
+    audio_duration_ms?: number;
     ip_address: string;
   }): Promise<MessageRow> {
     const [message] = await db('messages')
@@ -185,6 +186,7 @@ export const messageRepository = {
         type: data.type || 'text',
         file_url: data.file_url || null,
         gif_url: data.gif_url || null,
+        audio_duration_ms: data.audio_duration_ms ?? null,
         link_preview: data.link_preview ? JSON.stringify(data.link_preview) : null,
         ip_address: data.ip_address,
       })

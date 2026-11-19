@@ -13,12 +13,14 @@
  */
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, Fragment } from 'react';
 import { useAuth } from '@/hooks/useAuth';
 import { useRouter } from 'next/navigation';
 import api from '@/lib/api';
 import { safeLocalMediaUrl, safeGifUrl } from '@/lib/safeUrl';
 import { TierSettingsPanels } from '@/components/admin/TierSettingsPanels';
+import { VoiceSettingsPanel } from '@/components/admin/VoiceSettingsPanel';
+import { GroupVoiceEditor } from '@/components/admin/GroupVoiceEditor';
 import { AdminFilesGallery } from '@/components/admin/AdminFilesGallery';
 
 // ─── Session admin ────────────────────────────────────────────────
@@ -171,6 +173,7 @@ export default function AdminPanelPage() {
 
   // ⭐ État modal création salon officiel
   const [showCreateGroup, setShowCreateGroup] = useState(false);
+  const [voiceOpen, setVoiceOpen] = useState<string | null>(null);
   const [newGroupName, setNewGroupName] = useState('');
   const [newGroupDesc, setNewGroupDesc] = useState('');
   const [newGroupType, setNewGroupType] = useState('public' as 'public' | 'private');
@@ -1274,7 +1277,7 @@ export default function AdminPanelPage() {
                 <table className="w-full">
                   <thead>
                     <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}>
-                      {['Nom', 'Type', 'Statut', 'Membres', 'Créateur', 'Créé', 'Dernier msg'].map(h => (
+                      {['Nom', 'Type', 'Statut', 'Membres', 'Créateur', 'Créé', 'Dernier msg', 'Voix'].map(h => (
                         <th key={h} className="text-left px-4 py-3 text-[10px] font-semibold uppercase" style={{ color: 'rgba(255,255,255,0.3)' }}>{h}</th>
                       ))}
                     </tr>
@@ -1282,13 +1285,13 @@ export default function AdminPanelPage() {
                   <tbody>
                     {groups.length === 0 && !dashLoading && (
                       <tr>
-                        <td colSpan={7} className="px-4 py-12 text-center text-sm" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                        <td colSpan={8} className="px-4 py-12 text-center text-sm" style={{ color: 'rgba(255,255,255,0.3)' }}>
                           Aucun salon — créez un salon officiel ou attendez que des utilisateurs en créent.
                         </td>
                       </tr>
                     )}
-                    {groups.map(g => (
-                      <tr key={g.id} className="transition-colors" style={{
+                    {groups.map(g => (<Fragment key={g.id}>
+                      <tr className="transition-colors" style={{
                         borderBottom: '1px solid rgba(255,255,255,0.04)',
                         background: g.is_official ? 'rgba(139,92,246,0.06)' : 'transparent',
                       }}>
@@ -1318,8 +1321,24 @@ export default function AdminPanelPage() {
                         </td>
                         <td className="px-4 py-3 text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>{new Date(g.created_at).toLocaleDateString('fr-FR')}</td>
                         <td className="px-4 py-3 text-[10px]" style={{ color: 'rgba(255,255,255,0.3)' }}>{g.last_message_at ? new Date(g.last_message_at).toLocaleDateString('fr-FR') : '—'}</td>
+                        <td className="px-4 py-3">
+                          <button onClick={() => setVoiceOpen(voiceOpen === g.id ? null : g.id)} data-testid={`voice-toggle-${g.id}`}
+                            aria-expanded={voiceOpen === g.id} title="Voix, vidéo et partage d'écran de ce salon"
+                            className="px-2 py-1 rounded-lg text-[11px]"
+                            style={{ border: '1px solid rgba(255,255,255,0.1)', color: (g.allow_voice || g.allow_video || g.allow_screen || g.allow_voicemsg || g.voice_max_participants) ? '#c4b5fd' : 'rgba(255,255,255,0.4)' }}>
+                            🎙️{(g.allow_voice || g.allow_video || g.allow_screen || g.allow_voicemsg || g.voice_max_participants) ? ' •' : ''}
+                          </button>
+                        </td>
                       </tr>
-                    ))}
+                      {voiceOpen === g.id && (
+                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                          <td colSpan={8} className="p-0">
+                            <GroupVoiceEditor key={`${g.id}-${g.allow_voice}-${g.allow_video}-${g.allow_screen}-${g.allow_voicemsg}-${g.voice_max_participants}`} group={g}
+                              adminApi={adminApi} showToast={showToast} onSaved={loadGroups} />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>))}
                   </tbody>
                 </table>
               </div>
@@ -1716,6 +1735,11 @@ export default function AdminPanelPage() {
             <TierSettingsPanels getSetting={getSetting} updateSetting={updateSetting}
               settingsDirty={settingsDirty} settingsSaving={settingsSaving} saveSettings={saveSettings}
               adminApi={adminApi} showToast={showToast} reloadSettings={loadSettings} />
+          )}
+          {tab === 'settings' && !dashLoading && (
+            <VoiceSettingsPanel getSetting={getSetting} updateSetting={updateSetting}
+              settingsDirty={settingsDirty} settingsSaving={settingsSaving} saveSettings={saveSettings}
+              adminApi={adminApi} showToast={showToast} />
           )}
 
           {/* ══════════════════════════════════════════════════════

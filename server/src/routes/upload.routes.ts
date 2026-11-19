@@ -6,6 +6,7 @@
  *   - C (premium)    : max 25 Mo original → WebP 2560px, qualité 82
  *
  * POST /api/upload/file — Premium (C) uniquement, max 100 Mo
+ * POST /api/upload/audio — message vocal (réglages « messages vocaux » de l'admin : type de compte, durée)
  *
  * Compression : Sharp convertit en WebP (gain ~40-60% vs JPEG).
  * Fallback silencieux si sharp n'est pas installé.
@@ -21,8 +22,9 @@ import { requireAuth } from '../middleware/auth.middleware';
 import { rateLimit } from '../middleware/rateLimit.middleware';
 import { db } from '../config/database';
 import { getIpFromRequest } from '../utils/ip';
-import { uploadService, QuotaExceededError, UploadActionError, IMAGE_DIR, FILE_DIR, THUMB_DIR, readableSize, contentHash, type MetadataMode } from '../services/upload.service';
-import { settingsService } from '../services/settings.service';
+import { uploadService, QuotaExceededError, UploadActionError, IMAGE_DIR, FILE_DIR, THUMB_DIR, AUDIO_DIR, readableSize, contentHash, type MetadataMode } from '../services/upload.service';
+import { settingsService, GUEST_VOICEMSG_QUOTA_BYTES } from '../services/settings.service';
+import { tierOf } from '../services/voice.service';
 
 // ─── Sharp (optionnel) ───────────────────────────────────────────────────────
 let sharp: any = null;
@@ -372,6 +374,69 @@ router.post('/file', requireAuth, rateLimit({ name: 'upload', max: 30, windowSec
       size_readable: readableSize(req.file.size),
       mimetype: req.file.mimetype,
     });
+  });
+});
+
+// ─── POST /api/upload/audio — message vocal ─────────────────────────────────
+// 🔐 Type de compte autorisé (réglage admin), durée et taille bornées, format vérifié sur le CONTENU
+// (WebM / Ogg = Opus ; MP4 = AAC de Safari), extension imposée par le serveur, quota, trace LCEN.
+// Le droit d'envoyer dans CE salon est revérifié à l'envoi du message (message.service).
+const AUDIO_HARD_LIMIT = 12 * 1024 * 1024;
+const AUDIO_TYPES: Record<string, string> = { '.webm': 'audio/webm', '.ogg': 'audio/ogg', '.m4a': 'audio/mp4' };
+const uploadAudioMiddleware = multer({ storage: makeStorage(AUDIO_DIR), limits: { fileSize: AUDIO_HARD_LIMIT, files: 1, fields: 5 } });
+
+/** Format réel d'un fichier audio d'après ses premiers octets ; null si inconnu */
+function detectAudio(filePath: string): string | null {
+  try {
+    const fd = fs.openSync(filePath, 'r'); const b = Buffer.alloc(12); fs.readSync(fd, b, 0, 12, 0); fs.closeSync(fd);
+    if (b[0] === 0x1a && b[1] === 0x45 && b[2] === 0xdf && b[3] === 0xa3) return '.webm';
+    if (b.toString('latin1', 0, 4) === 'OggS') return '.ogg';
+    if (b.toString('latin1', 4, 8) === 'ftyp') return '.m4a';
+  } catch { /* illisible */ }
+  return null;
+}
+
+router.post('/audio', requireAuth, rateLimit({ name: 'upload-audio', max: 30, windowSeconds: 600, by: 'user' }), (req: Request, res: Response) => {
+  uploadAudioMiddleware.single('audio')(req, res, async (err) => {
+    if (err instanceof multer.MulterError) return res.status(400).json({ error: err.code === 'LIMIT_FILE_SIZE' ? 'Message vocal trop long.' : err.message });
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) return res.status(400).json({ error: 'Aucun enregistrement reçu.' });
+    const file = req.file;
+    try {
+      const tier = await tierOf(req.user!.userId);
+      const rules = (await settingsService.forTier(tier)).voiceMsg;
+      if (!rules.allowed) { safeUnlink(file.path); return res.status(403).json({ error: 'Les messages vocaux ne sont pas autorisés pour ton compte.' }); }
+      const duration = Number(req.body?.duration_ms);
+      if (!Number.isInteger(duration) || duration < 300 || duration > rules.maxSeconds * 1000 + 1500) {
+        safeUnlink(file.path); return res.status(400).json({ error: `Durée invalide (maximum ${rules.maxSeconds} s).` });
+      }
+      // ~128 kbit/s au plus (Opus en enregistre ~32) + marge pour l'en-tête
+      if (file.size > rules.maxSeconds * 16_000 + 128 * 1024) { safeUnlink(file.path); return res.status(400).json({ error: 'Message vocal trop volumineux.' }); }
+      const ext = detectAudio(file.path);
+      if (!ext) { safeUnlink(file.path); return res.status(400).json({ error: 'Format audio non reconnu.' }); }
+      const name = `${crypto.randomUUID()}${ext}`;
+      fs.renameSync(file.path, path.join(AUDIO_DIR, name));
+      const url = `/uploads/audio/${name}`;
+      try {
+        if (tier === 'guest') {
+          const used = await uploadService.storageUsed(req.user!.userId);
+          if (used + file.size > GUEST_VOICEMSG_QUOTA_BYTES) throw new QuotaExceededError(used, GUEST_VOICEMSG_QUOTA_BYTES);
+        } else await uploadService.assertQuota(req.user!.userId, tier, file.size);
+        await uploadService.record({
+          userId: req.user!.userId, username: req.user!.username, kind: 'audio', url,
+          originalName: `vocal${ext}`, mimeType: AUDIO_TYPES[ext], sizeBytes: file.size, ip: getIpFromRequest(req),
+        });
+      } catch (e: any) {
+        safeUnlink(path.join(AUDIO_DIR, name));
+        if (e instanceof QuotaExceededError) return quotaResponse(res, e);
+        throw e;
+      }
+      res.json({ url, duration_ms: duration, size: file.size });
+    } catch (e: any) {
+      safeUnlink(file.path);
+      console.error('❌ upload audio:', e?.message || e);
+      res.status(500).json({ error: 'Erreur serveur' });
+    }
   });
 });
 

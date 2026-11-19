@@ -34,6 +34,29 @@ services:
       timeout: 5s
       retries: 5
 
+  # LiveKit — appels voix / vidéo / partage d'écran — OPTIONNEL
+  # Ne démarre QUE si on le demande : docker compose --profile voix up -d
+  # Sans lui, le chat fonctionne normalement (boutons d'appel « Indisponible pour le moment »).
+  livekit:
+    image: livekit/livekit-server:v1.13.11
+    container_name: chatapp-livekit
+    profiles: ["voix"]
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml
+    environment:
+      # 🔐 Clés lues dans le .env de la racine (les mêmes que celles du serveur ChatApp)
+      LIVEKIT_KEYS: "${LIVEKIT_API_KEY:?LIVEKIT_API_KEY manquante dans .env}: ${LIVEKIT_API_SECRET:?LIVEKIT_API_SECRET manquante dans .env}"
+      # Adresse annoncée aux navigateurs pour l'audio / la vidéo. Recommandé : l'IP du PC sur le réseau local
+      # (ex. 192.168.1.20) avec LIVEKIT_BIND=0.0.0.0 — certains navigateurs / extensions refusent 127.0.0.1.
+      NODE_IP: "${LIVEKIT_NODE_IP:-127.0.0.1}"
+    ports:
+      # 127.0.0.1 = ce PC uniquement ; LIVEKIT_BIND=0.0.0.0 pour le réseau local (tests téléphone)
+      - "${LIVEKIT_BIND:-127.0.0.1}:7880:7880"        # signalisation + API
+      - "${LIVEKIT_BIND:-127.0.0.1}:7881:7881"        # média en TCP (repli)
+      - "${LIVEKIT_BIND:-127.0.0.1}:7882:7882/udp"    # média en UDP
+    volumes:
+      - ./livekit/livekit.yaml:/etc/livekit.yaml:ro
+
 volumes:
   pgdata:
   redisdata:

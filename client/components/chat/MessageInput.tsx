@@ -12,7 +12,7 @@
 'use client';
 
 import {
-  useState, useCallback, useRef, useEffect,
+  useState, useCallback, useRef, useEffect, type ReactNode,
   type KeyboardEvent, type ChangeEvent, type DragEvent,
 } from 'react';
 import { EmojiPicker }     from './EmojiPicker';
@@ -23,10 +23,12 @@ import type { GalleryItem } from '@/lib/files';
 import { useMentions }     from '@/hooks/useMentions';
 import { uploadImage, uploadFile } from '@/lib/api';
 import { showModal } from '@/components/ui/AppModal';
+import { VoiceMsgButton, VoiceRecorderPanel } from './VoiceRecorder';
+import type { RecTarget } from '@/hooks/useVoiceRecorder';
 
 interface MessageInputProps {
   onSend:       (content: string) => Promise<void>;
-  onSendMedia:  (params: { type: 'image' | 'gif' | 'file'; file_url?: string; gif_url?: string; content?: string }) => Promise<void>;
+  onSendMedia:  (params: { type: 'image' | 'gif' | 'file' | 'audio'; file_url?: string; gif_url?: string; content?: string; audio_duration_ms?: number }) => Promise<void>;
   onTyping:     () => void;
   channelName:  string;
   disabled?:    boolean;
@@ -35,6 +37,12 @@ interface MessageInputProps {
   /** Fichier déposé ailleurs dans la zone de discussion : mis en attente ici (comme un dépôt dans la barre) */
   droppedFile?:      File | null;
   onDroppedFileUsed?: () => void;
+  /** Boutons d'appel (voix / vidéo / écran) selon le choix d'emplacement ; chacun s'affiche ou non tout seul */
+  voiceComposer?: ReactNode;   // à droite du bouton GIF
+  voiceSend?:     ReactNode;   // juste avant le bouton envoyer
+  voiceMedia?:    ReactNode;   // dans le menu 📎
+  /** Salon / message privé actuel, pour les messages vocaux (bouton 🎤 aux emplacements choisis par l'admin) */
+  voiceMsg?: RecTarget | null;
 }
 
 interface StagedFile {
@@ -70,7 +78,7 @@ function isImageFile(file: File): boolean {
 // ─── Composant ───────────────────────────────────────────────────────────────
 
 export function MessageInput({
-  onSend, onSendMedia, onTyping, channelName, disabled, groupId, currentTier, droppedFile, onDroppedFileUsed,
+  onSend, onSendMedia, onTyping, channelName, disabled, groupId, currentTier, droppedFile, onDroppedFileUsed, voiceComposer, voiceSend, voiceMedia, voiceMsg = null,
 }: MessageInputProps) {
   const [content,        setContent]        = useState('');
   const [sending,        setSending]        = useState(false);
@@ -389,6 +397,9 @@ export function MessageInput({
 
         <MentionDropdown suggestions={suggestions} isOpen={isOpen} onSelect={handleMentionSelect} onClose={closeSuggestions} />
 
+        {/* 🎤 Enregistrement d'un message vocal (réécoute obligatoire avant l'envoi) */}
+        <VoiceRecorderPanel target={disabled ? null : voiceMsg} onSend={(p) => onSendMedia(p)} />
+
         {/* Bouton 📎 */}
         <div ref={attachWrapRef} className="relative flex-shrink-0">
           <button ref={attachBtnRef} disabled={disabled || uploading}
@@ -453,6 +464,8 @@ export function MessageInput({
                   <div className="text-[10px] text-[var(--t3)]">Renvoyer sans nouvel envoi</div>
                 </div>
               </button>
+              {voiceMedia}
+              <VoiceMsgButton where="media" target={voiceMsg} asMenuItem onPicked={() => setShowAttachMenu(false)} />
               <div className="h-px bg-[var(--border)] mx-2" />
               <div className="px-3 py-1.5 text-[10px] text-[var(--t3)]">💡 Glisser-déposer aussi supporté</div>
             </div>
@@ -469,6 +482,9 @@ export function MessageInput({
           }`} title="Envoyer un GIF">
           GIF
         </button>
+        {voiceComposer}
+        <VoiceMsgButton where="composer" target={disabled ? null : voiceMsg}
+          btnClass="w-9 h-9 rounded-xl flex items-center justify-center text-[var(--t3)] hover:text-[var(--t1)] hover:bg-[var(--glass-h)] transition-all flex-shrink-0" />
 
         {/* Champ texte */}
         <input ref={inputRef} type="text" value={content}
@@ -484,6 +500,10 @@ export function MessageInput({
         />
 
         <EmojiPicker onSelect={handleEmojiSelect} />
+
+        {voiceSend}
+        <VoiceMsgButton where="send" target={disabled ? null : voiceMsg}
+          btnClass="w-9 h-9 rounded-xl flex items-center justify-center text-[var(--t3)] hover:text-[var(--t1)] hover:bg-[var(--glass-h)] transition-all flex-shrink-0" />
 
         <button onClick={handleSend} disabled={!canSend}
           className="w-9 h-9 rounded-xl bg-gradient-to-br from-[var(--acc)] to-indigo-500 text-white flex items-center justify-center flex-shrink-0 transition-all shadow-[0_0_14px_var(--acc-g)] hover:brightness-110 hover:scale-105 disabled:opacity-30 disabled:hover:scale-100"

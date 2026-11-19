@@ -40,6 +40,51 @@ export const MOBILE_LAYOUTS: MobileLayout[] = ['stack', 'tabs', 'drawers'];
 export const MOBILE_LAYOUT_RULES: MobileLayoutRule[] = [...MOBILE_LAYOUTS, 'option'];
 export const DEFAULT_MOBILE_LAYOUT: MobileLayout = 'stack';
 
+/**
+ * Voix / vidéo / partage d'écran (Lot A, socle sans LiveKit)
+ *   VoiceMode  : off (boutons invisibles) · unavailable (boutons grisés) · on (activée)
+ *   VoiceCap   : voice (voix) · video (vidéo) · screen (partage d'écran), réglables indépendamment
+ *   RoomKind   : public · private · dm (message privé)
+ *   VoiceEntry : où apparaissent les boutons d'appel — un ou plusieurs emplacements parmi
+ *                header (en-tête du salon) · members (liste des membres) · composer (zone de saisie, à droite de GIF)
+ *                · send (zone de saisie, à côté du bouton envoyer) · media (dans le menu 📎). Valeur = emplacements séparés par des virgules (« both » = header,members), ou « none ».
+ */
+export type VoiceMode = 'off' | 'unavailable' | 'on';
+export const VOICE_MODES: VoiceMode[] = ['off', 'unavailable', 'on'];
+export type VoiceCap = 'voice' | 'video' | 'screen';
+export const VOICE_CAPS: VoiceCap[] = ['voice', 'video', 'screen'];
+export type RoomKind = 'public' | 'private' | 'dm';
+export const ROOM_KINDS: RoomKind[] = ['public', 'private', 'dm'];
+export const VOICE_PLACES = ['header', 'members', 'composer', 'send', 'media'] as const;
+export type VoicePlace = (typeof VOICE_PLACES)[number];
+/** Choix d'un membre : emplacements normalisés (« header,members »), ou « none » (aucun bouton) */
+export type VoiceEntryChoice = string;
+/** Règle de l'admin : « option » (chaque membre choisit) ou des emplacements imposés */
+export type VoiceEntryRule = string;
+export const DEFAULT_VOICE_ENTRY: VoiceEntryChoice = 'header,members';
+
+/** Normalise une liste d'emplacements ; null si invalide (valeur inconnue, vide…) */
+export function normalizeVoiceEntry(raw: unknown): VoiceEntryChoice | null {
+  if (typeof raw !== 'string' || raw.length > 60) return null;
+  const v = raw.trim();
+  if (v === 'none') return 'none';
+  const parts = v.split(',').map((p) => p.trim());
+  if (parts.length === 0 || parts.length > 8 || parts.some((p) => !p)) return null;
+  const picked = new Set<string>();
+  for (const p of parts) {
+    if (p === 'both') { picked.add('header'); picked.add('members'); }
+    else if ((VOICE_PLACES as readonly string[]).includes(p)) picked.add(p);
+    else return null;
+  }
+  return VOICE_PLACES.filter((p) => picked.has(p)).join(',');
+}
+/** Règle admin valide ou null */
+export function normalizeVoiceRule(raw: unknown): VoiceEntryRule | null {
+  return typeof raw === 'string' && raw.trim() === 'option' ? 'option' : normalizeVoiceEntry(raw);
+}
+
+export type CapMatrix = Record<VoiceCap, boolean>;
+
 /** Bornes de sécurité des réglages numériques */
 export const SETTING_BOUNDS = {
   history_limit: { min: 0, max: 100000 },
@@ -48,10 +93,49 @@ export const SETTING_BOUNDS = {
   lcen_retention_days: { min: 365, max: 3650 },      // 1 an (LCEN) → 10 ans
   storage_quota_mb: { min: 0, max: 102400 },         // 0 (envoi désactivé) → 100 Go
   upload_expiry_days: { min: 0, max: 3650 },         // 0 (sans limite) → 10 ans
+  voice_max: { min: 2, max: 100 },                   // participants par appel
+  voicemsg_max_seconds: { min: 5, max: 600 },        // durée d'un message vocal (5 s → 10 min)
+  voicemsg_retention_days: { min: 0, max: 3650 },    // conservation des vocaux (0 = sans limite)
 } as const;
+
+/**
+ * Messages vocaux : indépendants des appels (pas besoin de LiveKit).
+ * Autorisés si le type de compte ET le salon (dérogation, sinon type de salon) l'autorisent.
+ * Emplacements du bouton 🎤 : composer (à droite de GIF) · send (à côté de Envoyer) · media (menu 📎), ou « none ».
+ */
+export const VOICEMSG_PLACES = ['composer', 'send', 'media'] as const;
+export type VoiceMsgPlace = (typeof VOICEMSG_PLACES)[number];
+export function normalizeVoiceMsgPlaces(raw: unknown): string | null {
+  if (typeof raw !== 'string' || raw.length > 40) return null;
+  const v = raw.trim();
+  if (v === 'none') return 'none';
+  const parts = v.split(',').map((p) => p.trim());
+  if (!parts.length || parts.some((p) => !(VOICEMSG_PLACES as readonly string[]).includes(p))) return null;
+  return VOICEMSG_PLACES.filter((p) => parts.includes(p)).join(',');
+}
+export interface VoiceMsgSettings { allowed: boolean; maxSeconds: number; retentionDays: number; places: string }
+const DEFAULT_VOICEMSG: Record<Tier, VoiceMsgSettings> = {
+  guest: { allowed: false, maxSeconds: 30, retentionDays: 30, places: 'send' },
+  registered: { allowed: true, maxSeconds: 60, retentionDays: 30, places: 'send' },
+  premium: { allowed: true, maxSeconds: 300, retentionDays: 30, places: 'send' },
+};
+/** Stockage autorisé aux invités pour leurs vocaux (s'ils y ont droit) : ils n'ont pas de quota de fichiers */
+export const GUEST_VOICEMSG_QUOTA_BYTES = 10 * 1024 * 1024;
 
 const DEFAULT_RATE_MS: Record<Tier, number> = { guest: 10000, registered: 1000, premium: 500 };
 const DEFAULT_QUOTA_MB: Record<Tier, number> = { guest: 0, registered: 200, premium: 2048 };
+// Voix / vidéo : sûr par défaut (invités rien ; inscrits voix ; Premium tout ; salons publics : voix seulement)
+const DEFAULT_VOICE_CAP: Record<Tier, CapMatrix> = {
+  guest: { voice: false, video: false, screen: false },
+  registered: { voice: true, video: false, screen: false },
+  premium: { voice: true, video: true, screen: true },
+};
+const DEFAULT_VOICE_ROOM: Record<RoomKind, CapMatrix> = {
+  public: { voice: true, video: false, screen: false },
+  private: { voice: true, video: true, screen: true },
+  dm: { voice: true, video: true, screen: true },
+};
+const DEFAULT_VOICE_MAX: Record<Tier, number> = { guest: 8, registered: 8, premium: 16 };
 
 export interface TierSettings {
   metadataMode: MetadataMode;
@@ -66,6 +150,14 @@ export interface TierSettings {
   uploadExpiryDays: number;
   /** Disposition sur téléphone imposée, ou « option » (choix du membre) */
   mobileLayout: MobileLayoutRule;
+  /** Voix / vidéo / écran autorisés pour ce type de compte (avant les règles par salon) */
+  voiceCaps: CapMatrix;
+  /** Participants maximum par appel */
+  voiceMax: number;
+  /** Où apparaissent les boutons d'appel, ou « option » (choix du membre) */
+  voiceEntry: VoiceEntryRule;
+  /** Messages vocaux pour ce type de compte */
+  voiceMsg: VoiceMsgSettings;
 }
 
 let cache: Record<string, string> | null = null;
@@ -97,6 +189,12 @@ function intIn(value: unknown, min: number, max: number, fallback: number): numb
   return Math.min(max, Math.max(min, n));
 }
 
+/** Lit trois réglages on/off (voix, vidéo, écran) ; valeur absente ou inconnue = défaut sûr */
+function capMatrix(s: Record<string, string>, keyOf: (c: VoiceCap) => string, fallback: CapMatrix): CapMatrix {
+  const read = (c: VoiceCap) => { const v = s[keyOf(c)]; return v === 'on' ? true : v === 'off' ? false : fallback[c]; };
+  return { voice: read('voice'), video: read('video'), screen: read('screen') };
+}
+
 export const settingsService = {
   async get(key: string): Promise<string | undefined> {
     return (await all())[key];
@@ -125,6 +223,39 @@ export const settingsService = {
       // Valeur inconnue : pile d'écrans (la disposition par défaut)
       mobileLayout: MOBILE_LAYOUT_RULES.includes(s[`mobile_layout_${tier}`] as MobileLayoutRule)
         ? (s[`mobile_layout_${tier}`] as MobileLayoutRule) : DEFAULT_MOBILE_LAYOUT,
+      voiceCaps: capMatrix(s, (c) => `voice_cap_${c}_${tier}`, DEFAULT_VOICE_CAP[tier]),
+      voiceMax: intIn(s[`voice_max_${tier}`], SETTING_BOUNDS.voice_max.min, SETTING_BOUNDS.voice_max.max, DEFAULT_VOICE_MAX[tier]),
+      // Valeur inconnue : « option » (chaque membre choisit) ; invités : en-tête par défaut
+      voiceEntry: normalizeVoiceRule(s[`voice_entry_${tier}`]) ?? (tier === 'guest' ? 'header' : 'option'),
+      voiceMsg: {
+        allowed: s[`voicemsg_cap_${tier}`] === 'on' ? true : s[`voicemsg_cap_${tier}`] === 'off' ? false : DEFAULT_VOICEMSG[tier].allowed,
+        maxSeconds: intIn(s[`voicemsg_max_seconds_${tier}`], SETTING_BOUNDS.voicemsg_max_seconds.min, SETTING_BOUNDS.voicemsg_max_seconds.max, DEFAULT_VOICEMSG[tier].maxSeconds),
+        retentionDays: intIn(s[`voicemsg_retention_days_${tier}`], SETTING_BOUNDS.voicemsg_retention_days.min, SETTING_BOUNDS.voicemsg_retention_days.max, DEFAULT_VOICEMSG[tier].retentionDays),
+        places: normalizeVoiceMsgPlaces(s[`voicemsg_entry_${tier}`]) ?? DEFAULT_VOICEMSG[tier].places,
+      },
+    };
+  },
+
+  /** Messages vocaux autorisés par type de salon (défaut : partout) */
+  async voiceMsgRooms(): Promise<Record<RoomKind, boolean>> {
+    const s = await all();
+    const read = (r: RoomKind) => s[`voicemsg_room_${r}`] !== 'off';
+    return { public: read('public'), private: read('private'), dm: read('dm') };
+  },
+
+  /** Mode général voix/vidéo réglé par l'admin (valeur inconnue = off : sûr par défaut) */
+  async voiceMode(): Promise<VoiceMode> {
+    const v = (await all())['voice_mode'];
+    return VOICE_MODES.includes(v as VoiceMode) ? (v as VoiceMode) : 'off';
+  },
+
+  /** Ce que permet chaque type de salon (public, privé, message privé) */
+  async voiceRooms(): Promise<Record<RoomKind, CapMatrix>> {
+    const s = await all();
+    return {
+      public: capMatrix(s, (c) => `voice_room_${c}_public`, DEFAULT_VOICE_ROOM.public),
+      private: capMatrix(s, (c) => `voice_room_${c}_private`, DEFAULT_VOICE_ROOM.private),
+      dm: capMatrix(s, (c) => `voice_room_${c}_dm`, DEFAULT_VOICE_ROOM.dm),
     };
   },
 
@@ -160,6 +291,22 @@ export function validateSettingUpdate(key: string, raw: unknown): { ok: true; va
   if (/^upload_delete_mode_(registered|premium)$/.test(key)) return choice([...DELETE_MODES]);
   if (/^upload_expiry_days_(registered|premium)$/.test(key)) return integer(SETTING_BOUNDS.upload_expiry_days.min, SETTING_BOUNDS.upload_expiry_days.max);
   if (/^mobile_layout_(guest|registered|premium)$/.test(key)) return choice([...MOBILE_LAYOUT_RULES]);
+  if (key === 'voice_mode') return choice([...VOICE_MODES]);
+  if (/^voice_cap_(voice|video|screen)_(guest|registered|premium)$/.test(key)) return choice(['on', 'off']);
+  if (/^voice_room_(voice|video|screen)_(public|private|dm)$/.test(key)) return choice(['on', 'off']);
+  if (/^voice_max_(guest|registered|premium)$/.test(key)) return integer(SETTING_BOUNDS.voice_max.min, SETTING_BOUNDS.voice_max.max);
+  if (/^voicemsg_cap_(guest|registered|premium)$/.test(key)) return choice(['on', 'off']);
+  if (/^voicemsg_room_(public|private|dm)$/.test(key)) return choice(['on', 'off']);
+  if (/^voicemsg_max_seconds_(guest|registered|premium)$/.test(key)) return integer(SETTING_BOUNDS.voicemsg_max_seconds.min, SETTING_BOUNDS.voicemsg_max_seconds.max);
+  if (/^voicemsg_retention_days_(guest|registered|premium)$/.test(key)) return integer(SETTING_BOUNDS.voicemsg_retention_days.min, SETTING_BOUNDS.voicemsg_retention_days.max);
+  if (/^voicemsg_entry_(guest|registered|premium)$/.test(key)) {
+    const p = normalizeVoiceMsgPlaces(value);
+    return p ? { ok: true, value: p } : { ok: false, error: `Valeur invalide pour ${key} (none, ou : ${VOICEMSG_PLACES.join(', ')})` };
+  }
+  if (/^voice_entry_(guest|registered|premium)$/.test(key)) {
+    const rule = normalizeVoiceRule(value);
+    return rule ? { ok: true, value: rule } : { ok: false, error: `Valeur invalide pour ${key} (option, none, ou emplacements : ${VOICE_PLACES.join(', ')})` };
+  }
   if (key === 'lcen_retention_days') return integer(SETTING_BOUNDS.lcen_retention_days.min, SETTING_BOUNDS.lcen_retention_days.max);
   return { ok: true, value };
 }

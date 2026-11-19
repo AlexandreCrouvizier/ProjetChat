@@ -15,6 +15,7 @@ import moderationRoutes from './routes/moderation.routes';
 import adminRouter, { adminAuthRouter } from './routes/admin.routes';
 import uploadRoutes from './routes/upload.routes';
 import gifsRoutes from './routes/gifs.routes';
+import voiceRoutes from './routes/voice.routes';
 import path from 'path';
 import { db } from './config/database';
 import { corsOrigin } from './utils/cors';
@@ -42,6 +43,8 @@ app.use('/api/users', usersRoutes);
 app.use('/api/moderation', moderationRoutes);
 // ⭐ GIF : configuration publique + recherche via le serveur (la clé API ne quitte jamais le serveur)
 app.use('/api/gifs', gifsRoutes);
+// 🎙️ Voix / vidéo : droits et jetons d'appel (contrôles côté serveur ; LiveKit optionnel)
+app.use('/api/voice', voiceRoutes);
 
 // ⭐ Phase 4.1g : paramètres de la liste des membres (publics, pas d'auth)
 // Route perdue lors d'un patch précédent d'app.ts — utilisée par MembersPanel.tsx

@@ -13,6 +13,9 @@ import { useAuthStore } from '@/stores/authStore';
 import { useGifConfig, invalidateGifConfigCache } from '@/hooks/useGifConfig';
 import { LayoutPicker } from '@/components/layout/LayoutPicker';
 import { useLayoutStore } from '@/hooks/useMobileLayout';
+import { VoiceEntryPicker, useShowVoiceEntry } from '@/components/layout/VoiceEntryPicker';
+import { MediaTestPanel } from '@/components/layout/MediaTestPanel';
+import { useVoiceStore } from '@/hooks/useVoice';
 
 interface EditProfileModalProps { isOpen: boolean; onClose: () => void; /** Ouvre la galerie « Mes fichiers » */ onOpenFiles?: () => void; }
 
@@ -49,6 +52,8 @@ export function EditProfileModal({ isOpen, onClose, onOpenFiles }: EditProfileMo
   const [gifDisplay, setGifDisplay] = useState(null as 'auto' | 'click' | null);
   const gifConfig = useGifConfig();
   const layoutRule = useLayoutStore((st) => st.rule);
+  const showVoiceEntry = useShowVoiceEntry();
+  const voiceOn = useVoiceStore((v) => !!v.status && v.status.mode !== 'off');
   const isGuest = user?.tier === 'guest';
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -303,6 +308,26 @@ export function EditProfileModal({ isOpen, onClose, onOpenFiles }: EditProfileMo
                 📱 Affichage sur téléphone
               </label>
               <LayoutPicker />
+            </div>
+          )}
+
+          {/* 🎙️ Boutons d'appel — visible seulement si l'admin laisse le choix */}
+          {showVoiceEntry && (
+            <div className="mb-5 pt-4 border-t border-[var(--border)]" data-testid="profile-voice-entry">
+              <label className="block text-[9px] font-semibold text-[var(--t3)] uppercase tracking-wider mb-2">
+                🎙️ Boutons voix / vidéo / écran
+              </label>
+              <VoiceEntryPicker />
+            </div>
+          )}
+
+          {/* 🎧 Tester et choisir micro / caméra / sortie son (si les appels ne sont pas désactivés) */}
+          {voiceOn && (
+            <div className="mb-5 pt-4 border-t border-[var(--border)]" data-testid="profile-media">
+              <label className="block text-[9px] font-semibold text-[var(--t3)] uppercase tracking-wider mb-2">
+                🎧 Micro et caméra
+              </label>
+              <MediaTestPanel />
             </div>
           )}
 

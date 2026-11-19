@@ -22,12 +22,13 @@ export const IMAGE_DIR = path.join(UPLOAD_ROOT, 'images');
 export const FILE_DIR = path.join(UPLOAD_ROOT, 'files');
 export const AVATAR_DIR = path.join(UPLOAD_ROOT, 'avatars');
 export const PREVIEW_DIR = path.join(UPLOAD_ROOT, 'previews'); // images d'aperçu de liens (copiées par le serveur)
-export const THUMB_DIR = path.join(UPLOAD_ROOT, 'thumbs');     // miniatures 400 px des images envoyées
-for (const dir of [UPLOAD_ROOT, IMAGE_DIR, FILE_DIR, AVATAR_DIR, PREVIEW_DIR, THUMB_DIR]) {
+export const THUMB_DIR = path.join(UPLOAD_ROOT, 'thumbs');
+export const AUDIO_DIR = path.join(UPLOAD_ROOT, 'audio');      // messages vocaux     // miniatures 400 px des images envoyées
+for (const dir of [UPLOAD_ROOT, IMAGE_DIR, FILE_DIR, AVATAR_DIR, PREVIEW_DIR, THUMB_DIR, AUDIO_DIR]) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-export type UploadKind = 'image' | 'file' | 'avatar';
+export type UploadKind = 'image' | 'file' | 'avatar' | 'audio';
 
 export const AVATAR_SIZE_PX = 256;
 export const AVATAR_MAX_INPUT_BYTES = 5 * 1024 * 1024;   // 5 Mo avant traitement
@@ -225,6 +226,20 @@ export const uploadService = {
       if (!days) continue;
       const rows = await db('uploads').join('users', 'uploads.user_id', 'users.id')
         .where('users.tier', tier).whereIn('uploads.kind', ['image', 'file']).whereNull('uploads.deleted_at')
+        .whereRaw(`uploads.created_at < now() - (? || ' days')::interval`, [String(days)])
+        .select('uploads.url').limit(500);
+      for (const r of rows) {
+        await this.removeFromMessages(r.url, 'expired', false, io);
+        await this.markDeleted(r.url, 'expired');
+        total++;
+      }
+    }
+    // Messages vocaux : durée de conservation propre à chaque type de compte (invités compris)
+    for (const tier of ['guest', 'registered', 'premium'] as const) {
+      const days = (await settingsService.forTier(tier)).voiceMsg.retentionDays;
+      if (!days) continue;
+      const rows = await db('uploads').join('users', 'uploads.user_id', 'users.id')
+        .where('users.tier', tier).where('uploads.kind', 'audio').whereNull('uploads.deleted_at')
         .whereRaw(`uploads.created_at < now() - (? || ' days')::interval`, [String(days)])
         .select('uploads.url').limit(500);
       for (const r of rows) {

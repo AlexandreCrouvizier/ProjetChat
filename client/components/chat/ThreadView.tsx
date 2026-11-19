@@ -188,7 +188,7 @@ export function ThreadView({ parentMessageId, groupId, currentUserId, currentUse
                   <MessageContent content={reply.content} type={reply.type}
                     file_url={(reply as any).file_url} gif_url={(reply as any).gif_url}
                     link_preview={(reply as any).link_preview}
-                    media_removed={(reply as any).media_removed} currentUsername={currentUsername} />
+                    media_removed={(reply as any).media_removed} audio_duration_ms={(reply as any).audio_duration_ms} currentUsername={currentUsername} />
                 </div>
               </div>
 

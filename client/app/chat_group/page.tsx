@@ -31,6 +31,12 @@ import api from '@/lib/api';
 import { showModal } from '@/components/ui/AppModal';
 import { useViewport } from '@/hooks/useViewport';
 import { useMobileLayout } from '@/hooks/useMobileLayout';
+import { useVoice } from '@/hooks/useVoice';
+import { VoiceButtons } from '@/components/chat/VoiceButtons';
+import { CallBar } from '@/components/chat/CallBar';
+import { CallStage } from '@/components/chat/CallStage';
+import { IncomingCall } from '@/components/chat/IncomingCall';
+import { useCallSignals } from '@/hooks/useCall';
 import { useDesktopPanels, PANEL_LIMITS } from '@/hooks/useDesktopPanels';
 import { ResizeHandle } from '@/components/layout/ResizeHandle';
 import { MobileMePanel } from '@/components/layout/MobileMePanel';
@@ -81,6 +87,8 @@ function ChatPageContent() {
   //   ou choix du membre dans son profil si l'admin a mis « option »).
   const vp = useViewport();
   const { effective: mobileLayout } = useMobileLayout(user?.id);
+  useVoice(user?.id); // 🎙️ voix / vidéo : état et droits (le serveur décide, voir /api/voice)
+  useCallSignals();   // 📞 sonnerie des messages privés ; quitte l'appel en quittant la page
   const panels = useDesktopPanels(user?.id);
   const compact = vp.ready && vp.compact;
   const narrow = compact && !vp.wide;
@@ -232,7 +240,7 @@ function ChatPageContent() {
   };
 
   // ⭐ Phase 4.1 — Envoi d'un média (image, gif, fichier)
-  const handleSendMedia = async (params: { type: 'image' | 'gif' | 'file'; file_url?: string; gif_url?: string; content?: string }) => {
+  const handleSendMedia = async (params: { type: 'image' | 'gif' | 'file' | 'audio'; file_url?: string; gif_url?: string; content?: string; audio_duration_ms?: number }) => {
     // Salon ou message privé : les mêmes contrôles s'appliquent côté serveur
     try { await activeChat.sendMediaMessage(params); }
     catch (err: any) {
@@ -327,13 +335,32 @@ function ChatPageContent() {
       </button>
     );
   }
-  const headerRight = mode === 'group' ? (
+  const voiceHeader = (mode === 'group' ? !!activeGroupId : !!activeConvId) ? (
+    <VoiceButtons where="header" kind={mode === 'dm' ? 'dm' : (activeGroup?.type === 'private' ? 'private' : 'public')}
+      groupId={mode === 'group' ? activeGroupId : null} conversationId={mode === 'dm' ? activeConvId : null} btnClass={headerBtn}
+      label={mode === 'group' ? `#${activeGroupName}` : `@${activeConvName}`} />
+  ) : null;
+  const membersButton = mode === 'group' ? (
     <button type="button" onClick={openMembers} className={headerBtn} data-testid={compact ? 'open-members' : 'toggle-members'}
       aria-expanded={membersOpen} aria-label={compact ? 'Membres du salon' : (panels.membersHidden ? 'Afficher les membres' : 'Masquer les membres')}
       title={compact ? 'Membres du salon' : (panels.membersHidden ? 'Afficher les membres' : 'Masquer les membres')}>
       {compact ? <IconUsers /> : <IconPanelRight />}
     </button>
   ) : null;
+  const headerRight = <>{voiceHeader}{membersButton}</>;
+  // Autres emplacements des boutons d'appel : zone de saisie (à côté de GIF / de envoyer) et menu 📎
+  const voiceTarget = (mode === 'group' ? !!activeGroupId : !!activeConvId) ? {
+    kind: (mode === 'dm' ? 'dm' : (activeGroup?.type === 'private' ? 'private' : 'public')) as 'dm' | 'private' | 'public',
+    groupId: mode === 'group' ? activeGroupId : null,
+    conversationId: mode === 'dm' ? activeConvId : null,
+    label: mode === 'group' ? `#${activeGroupName}` : `@${activeConvName}`,
+  } : null;
+  const composerBtn = 'w-9 h-9 rounded-xl flex items-center justify-center text-[var(--t3)] hover:text-[var(--t1)] hover:bg-[var(--glass-h)] transition-all';
+  const voiceComposer = voiceTarget ? <VoiceButtons where="composer" {...voiceTarget} btnClass={composerBtn} /> : null;
+  const voiceSend = voiceTarget ? <VoiceButtons where="send" {...voiceTarget} btnClass={composerBtn} /> : null;
+  const voiceMedia = voiceTarget
+    ? <VoiceButtons where="media" {...voiceTarget} caption="Appel" btnClass="w-8 h-8 rounded-lg flex items-center justify-center hover:bg-[var(--glass-h)]" />
+    : null;
 
   // Colonne de discussion (la même dans toutes les dispositions)
   const edge = compact && (narrow || mobileLayout !== 'stack');
@@ -367,6 +394,10 @@ function ChatPageContent() {
           {headerRight}
         </div>
 
+        {/* 📞 Appel en cours (ou dernier message : appel terminé, refusé…) */}
+        <CallBar />
+        <CallStage />
+
         {/* ⭐ blockedUserIds passé pour filtrer les messages */}
         <MessageList messages={activeChat.messages} isLoading={activeChat.isLoading} hasMore={activeChat.hasMore}
           onLoadMore={activeChat.loadMore} onToggleReaction={activeChat.toggleReaction}
@@ -389,6 +420,8 @@ function ChatPageContent() {
           channelName={mode === 'group' ? activeGroupName : activeConvName}
           disabled={mode === 'group' ? !activeGroupId : !activeConvId}
           groupId={mode === 'group' ? activeGroupId : null}
+          voiceComposer={voiceComposer} voiceSend={voiceSend} voiceMedia={voiceMedia}
+          voiceMsg={voiceTarget ? { kind: voiceTarget.kind, groupId: voiceTarget.groupId, conversationId: voiceTarget.conversationId } : null}
           currentTier={user?.tier || 'guest'} />
       </div>
   );
@@ -523,6 +556,9 @@ function ChatPageContent() {
           )}
         </div>
       )}
+
+      {/* 📞 Appel entrant (message privé) */}
+      <IncomingCall />
 
       {/* ⭐ ProfileModal: onClose rafraîchit les bloqués */}
       <ProfileModal userId={profileUserId} currentUserId={user?.id || ''} currentUserTier={user?.tier || 'guest'}

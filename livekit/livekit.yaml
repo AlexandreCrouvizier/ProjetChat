@@ -1,0 +1,30 @@
+# LiveKit — serveur d'appels (voix / vidéo / partage d'écran) pour le développement local
+# Lancé par : docker compose --profile voix up -d
+# 🔐 Aucun secret ici : les clés viennent du .env (LIVEKIT_API_KEY / LIVEKIT_API_SECRET),
+#    l'adresse annoncée aux navigateurs vient de LIVEKIT_NODE_IP.
+
+# Port principal (signalisation WebSocket + API du serveur ChatApp)
+port: 7880
+
+rtc:
+  # Repli ICE en TCP quand l'UDP est bloqué
+  tcp_port: 7881
+  # Tout le trafic audio/vidéo passe par CE seul port UDP (plus simple à ouvrir dans Docker et le pare-feu)
+  udp_port: 7882
+  # Pas de recherche d'IP publique : on annonce l'IP donnée par LIVEKIT_NODE_IP (PC ou réseau local)
+  use_external_ip: false
+  # ICE « lite » : c'est le NAVIGATEUR qui cherche le chemin vers LiveKit (adresse annoncée + port redirigé
+  # par Docker) ; LiveKit se contente de répondre. Évite les échecs dus à la traduction d'adresses de Docker
+  # Desktop (Windows / macOS), surtout quand le navigateur expose ses vraies adresses (micro déjà autorisé).
+  use_ice_lite: true
+
+room:
+  auto_create: true
+  # Salle vide fermée vite (secondes)
+  empty_timeout: 60
+  departure_timeout: 20
+  # Plafond absolu ; la vraie limite (2 à 100) est donnée par ChatApp dans chaque jeton
+  max_participants: 100
+
+logging:
+  level: info

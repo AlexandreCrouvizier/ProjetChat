@@ -68,7 +68,7 @@ export const conversationRepository = {
         ...conv,
         // Média sans texte : aperçu lisible dans la liste des conversations
         last_message_content: lastMsg?.content
-          || (lastMsg?.type === 'image' ? '📷 Image' : lastMsg?.type === 'gif' ? '🎞️ GIF' : lastMsg?.type === 'file' ? '📎 Fichier' : null),
+          || (lastMsg?.type === 'image' ? '📷 Image' : lastMsg?.type === 'gif' ? '🎞️ GIF' : lastMsg?.type === 'file' ? '📎 Fichier' : lastMsg?.type === 'audio' ? '🎤 Message vocal' : null),
         last_message_author: lastMsg?.author_username || null,
         unread_count: parseInt(result?.count as string, 10) || 0,
       });

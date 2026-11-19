@@ -2,7 +2,7 @@
  * websocket/message.handler.ts — Phase 4.1 : support médias (image, file, gif)
  *
  * L'événement message:send accepte maintenant :
- *   type?     : 'text' | 'image' | 'file' | 'gif' (défaut 'text')
+ *   type?     : 'text' | 'image' | 'file' | 'gif' | 'audio' (défaut 'text')
  *   file_url? : URL serveur pour les types image/file
  *   gif_url?  : URL Tenor pour le type gif
  */
@@ -24,6 +24,7 @@ export function registerMessageHandlers(io: SocketIOServer, socket: Authenticate
     parent_message_id?: string;
     type?: string;
     file_url?: string;
+    audio_duration_ms?: number;
     gif_url?: string;
   }, callback?: (response: any) => void) => {
     try {
@@ -36,6 +37,7 @@ export function registerMessageHandlers(io: SocketIOServer, socket: Authenticate
         parentMessageId: data.parent_message_id,
         type: data.type || 'text',
         fileUrl: data.file_url,
+        audioDurationMs: data.audio_duration_ms,
         gifUrl: data.gif_url,
         ip,
       });

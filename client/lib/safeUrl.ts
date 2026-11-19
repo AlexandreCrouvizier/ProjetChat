@@ -24,6 +24,11 @@ export function safeLocalMediaUrl(url: unknown): string | null {
   return typeof url === 'string' && /^\/uploads\/(images|files)\/[0-9a-f-]{36}\.[a-z0-9]{1,10}$/i.test(url) ? url : null;
 }
 
+/** 🔐 Message vocal : uniquement nos fichiers audio (/uploads/audio/<uuid>.webm|ogg|m4a) */
+export function safeAudioUrl(url: unknown): string | null {
+  return typeof url === 'string' && /^\/uploads\/audio\/[0-9a-f-]{36}\.(webm|ogg|m4a)$/.test(url) ? url : null;
+}
+
 /** 🔐 GIF : uniquement hébergés par un fournisseur (même liste que la CSP et que le serveur) */
 export function safeGifUrl(url: unknown): string | null {
   return isGifMediaUrl(url) ? (url as string) : null;

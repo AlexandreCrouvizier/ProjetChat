@@ -9,6 +9,7 @@ import { safeAvatarUrl } from '@/lib/safeUrl';
 import { useTheme } from '@/hooks/useTheme';
 import { LayoutPicker } from './LayoutPicker';
 import { useLayoutStore } from '@/hooks/useMobileLayout';
+import { VoiceEntryPicker, useShowVoiceEntry } from './VoiceEntryPicker';
 
 interface Props {
   user: any;
@@ -22,6 +23,7 @@ const TIER_LABEL: Record<string, string> = { guest: '👤 Invité', registered: 
 export function MobileMePanel({ user, onEditProfile, onOpenFiles, onLogout }: Props) {
   const { theme, toggleTheme } = useTheme();
   const rule = useLayoutStore((s) => s.rule);
+  const showVoiceEntry = useShowVoiceEntry();
   const avatar = safeAvatarUrl(user?.avatar_url);
   const isGuest = user?.tier === 'guest';
   const row = 'w-full flex items-center gap-3 px-4 min-h-[52px] rounded-xl text-left text-[15px] text-[var(--t1)] hover:bg-[var(--glass-h)] active:bg-[var(--glass-h)] transition-colors';
@@ -56,6 +58,13 @@ export function MobileMePanel({ user, onEditProfile, onOpenFiles, onLogout }: Pr
         <div className="glass rounded-2xl p-3.5 space-y-2.5">
           <p className="text-[11px] font-semibold text-[var(--t3)] uppercase tracking-wider">📱 Disposition de l&apos;écran</p>
           <LayoutPicker compact />
+        </div>
+      )}
+
+      {showVoiceEntry && (
+        <div className="glass rounded-2xl p-3.5 space-y-2.5">
+          <p className="text-[11px] font-semibold text-[var(--t3)] uppercase tracking-wider">🎙️ Boutons voix / vidéo / écran</p>
+          <VoiceEntryPicker />
         </div>
       )}
     </div>

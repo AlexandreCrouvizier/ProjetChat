@@ -62,6 +62,14 @@ export const env = {
   GIF_KLIPY_API_KEY: process.env.GIF_KLIPY_API_KEY || '',
   GIF_GIPHY_API_KEY: process.env.GIF_GIPHY_API_KEY || '',
   GIF_TENOR_API_KEY: process.env.GIF_TENOR_API_KEY || '',
+
+  // 🔐 Voix / vidéo (LiveKit) : lues UNIQUEMENT par le serveur (la clé secrète ne quitte jamais le serveur).
+  // Variables absentes = fonction « indisponible » : le chat fonctionne normalement sans LiveKit.
+  LIVEKIT_URL: process.env.LIVEKIT_URL || '',
+  LIVEKIT_API_KEY: process.env.LIVEKIT_API_KEY || '',
+  LIVEKIT_API_SECRET: process.env.LIVEKIT_API_SECRET || '',
+  /** Adresse de LiveKit vue par les navigateurs (wss://…). Vide : LIVEKIT_URL. */
+  LIVEKIT_PUBLIC_URL: process.env.LIVEKIT_PUBLIC_URL || '',
 };
 
 // Vérifie les variables critiques en production

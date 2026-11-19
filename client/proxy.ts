@@ -37,6 +37,30 @@ function realtimeSources(request: NextRequest): string[] {
   return [`${secure ? 'https' : 'http'}://${safeHost}:4000`, `${secure ? 'wss' : 'ws'}://${safeHost}:4000`];
 }
 
+/**
+ * Serveur d'appels LiveKit (voix / vidéo). LIVEKIT_PUBLIC_URL (client/.env.local, obligatoire en production,
+ * wss://…) ; sinon, en développement seulement : LiveKit sur ce PC, port 7880 (même hôte que la page).
+ */
+function liveKitSources(request: NextRequest): string[] {
+  const configured = process.env.LIVEKIT_PUBLIC_URL;
+  if (configured) {
+    try {
+      const u = new URL(configured);
+      if (u.protocol === 'wss:' || u.protocol === 'https:') return [`wss://${u.host}`, `https://${u.host}`];
+      if (isDev && (u.protocol === 'ws:' || u.protocol === 'http:')) return [`ws://${u.host}`, `http://${u.host}`];
+    } catch { /* URL invalide → rien */ }
+    return [];
+  }
+  if (!isDev) return [];
+  const host = (request.headers.get('host') || 'localhost').toLowerCase();
+  const hostname = host.startsWith('[') ? host.slice(0, host.indexOf(']') + 1) : host.split(':')[0];
+  const safeHost = /^([a-z0-9.-]+|\[[0-9a-f:]+\])$/.test(hostname) ? hostname : 'localhost';
+  const secure = request.nextUrl.protocol === 'https:';
+  // Même hôte que la page (téléphone du Wi-Fi), et ce PC (localhost / 127.0.0.1)
+  return [...new Set([safeHost, 'localhost', '127.0.0.1'])]
+    .flatMap((h) => [`${secure ? 'wss' : 'ws'}://${h}:7880`, `${secure ? 'https' : 'http'}://${h}:7880`]);
+}
+
 function buildCsp(nonce: string, request: NextRequest): string {
   const directives: Record<string, string[]> = {
     'default-src': ["'self'"],
@@ -52,7 +76,7 @@ function buildCsp(nonce: string, request: NextRequest): string {
     'media-src': ["'self'", 'blob:'],
     'font-src': ["'self'", 'data:'],
     // 🔐 Seulement notre site et le serveur temps réel (la recherche GIF passe par le serveur)
-    'connect-src': ["'self'", ...realtimeSources(request)],
+    'connect-src': ["'self'", ...realtimeSources(request), ...liveKitSources(request)],
     'worker-src': ["'self'", 'blob:'],
     'manifest-src': ["'self'"],
     'object-src': ["'none'"],

@@ -56,3 +56,6 @@ outils-tests/
 # Documents du projet (Markdown a la racine : SECURITE, AMELIORATIONS, BILAN, README...) :
 # uniquement en local, jamais sur Git (le depot GitHub est public). Seul le code est publie.
 /*.md
+
+# Programme LiveKit pour Windows (lancement sans Docker, developpement)
+livekit/bin/

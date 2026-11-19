@@ -101,10 +101,11 @@ export function useDMChat(conversationId: string | null, currentUserId: string |
 
   // ⭐ Média en message privé (image, GIF, fichier) : mêmes contrôles côté serveur que dans les salons
   const sendMediaMessage = useCallback(async (params: {
-    type: 'image' | 'gif' | 'file';
+    type: 'image' | 'gif' | 'file' | 'audio';
     file_url?: string;
     gif_url?: string;
     content?: string;
+    audio_duration_ms?: number;
   }) => {
     const socket = getSocket();
     if (!socket || !conversationId) return;
@@ -115,6 +116,7 @@ export function useDMChat(conversationId: string | null, currentUserId: string |
         type: params.type,
         file_url: params.file_url,
         gif_url: params.gif_url,
+        audio_duration_ms: params.audio_duration_ms,
       }, (response: any) => {
         if (response.success) resolve(response.message);
         else reject(new Error(response.error));

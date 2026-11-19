@@ -36,7 +36,8 @@ const nextConfig = {
       { key: 'X-Content-Type-Options', value: 'nosniff' },
       { key: 'X-Frame-Options', value: 'DENY' },
       { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-      { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=(), payment=(), usb=()' },
+      // 🎙️ Micro, caméra et partage d'écran : uniquement pour notre site (appels), jamais pour un contenu intégré
+      { key: 'Permissions-Policy', value: 'camera=(self), microphone=(self), display-capture=(self), geolocation=(), payment=(), usb=()' },
       { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
     ];
     if (process.env.NODE_ENV === 'production') {

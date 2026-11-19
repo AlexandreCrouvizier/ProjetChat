@@ -27,6 +27,7 @@ export function registerConversationHandlers(io: SocketIOServer, socket: Authent
     // ⭐ Médias en message privé : mêmes contrôles que dans les salons (message.service)
     type?: string;
     file_url?: string;
+    audio_duration_ms?: number;
     gif_url?: string;
   }, callback?: (res: any) => void) => {
     try {
@@ -36,7 +37,7 @@ export function registerConversationHandlers(io: SocketIOServer, socket: Authent
       const message = await messageService.sendMessage({
         content: typeof data.content === 'string' ? data.content : '', authorId: userId,
         conversationId: data.conversation_id, tier, replyToId: data.reply_to_id, ip,
-        type: data.type || 'text', fileUrl: data.file_url, gifUrl: data.gif_url,
+        type: data.type || 'text', fileUrl: data.file_url, gifUrl: data.gif_url, audioDurationMs: data.audio_duration_ms,
       });
 
       await conversationRepository.updateLastMessage(data.conversation_id);
@@ -98,6 +99,7 @@ function dmNotificationText(message: { type?: string; content?: string }): strin
   if (message.type === 'image') return '📷 Image';
   if (message.type === 'gif') return '🎞️ GIF';
   if (message.type === 'file') return '📎 Fichier';
+  if (message.type === 'audio') return '🎤 Message vocal';
   return '';
 }
 

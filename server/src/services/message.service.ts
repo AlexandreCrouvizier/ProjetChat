@@ -17,6 +17,7 @@ import { moderationService } from './moderation.service';
 import { linkPreviewService } from './linkPreview.service';
 import { gifService } from './gif.service';
 import { uploadService } from './upload.service';
+import { voiceMsgRules } from './voice.service';
 import { checkRateLimit } from '../middleware/rateLimit.middleware';
 import { historyService } from './history.service';
 import { logAudit } from '../middleware/audit.middleware';
@@ -25,10 +26,11 @@ import { VALIDATION, TIER_LIMITS } from '../../../shared/constants';
 import { db } from '../config/database';
 
 // 🔐 Types de message qu'un client a le droit d'envoyer ('system' est réservé au serveur)
-const CLIENT_MESSAGE_TYPES = ['text', 'image', 'file', 'gif'];
+const CLIENT_MESSAGE_TYPES = ['text', 'image', 'file', 'gif', 'audio'];
 // 🔐 Les médias doivent provenir de NOS uploads (nom = UUID généré par le serveur)
 const IMAGE_URL_RE = /^\/uploads\/images\/[0-9a-f-]{36}\.(webp|jpe?g|png|gif)$/i;
 const FILE_URL_RE  = /^\/uploads\/files\/[0-9a-f-]{36}\.[a-z0-9]{1,10}$/i;
+const AUDIO_URL_RE = /^\/uploads\/audio\/[0-9a-f-]{36}\.(webm|ogg|m4a)$/;
 
 function isSafeHttpsUrl(value: unknown, maxLength = 1000): value is string {
   if (typeof value !== 'string' || value.length > maxLength) return false;
@@ -59,6 +61,7 @@ function formatMessage(msg: any, options?: { reactions?: any[]; replyTo?: any; t
     file_url: msg.media_removed ? null : (msg.file_url || null),
     media_removed: msg.media_removed || null,
     gif_url: msg.gif_url || null,
+    audio_duration_ms: msg.type === 'audio' ? (msg.audio_duration_ms ?? null) : null,
     link_preview: msg.link_preview || null,
     is_pinned: msg.is_pinned || false,
     edited_at: msg.edited_at || null,
@@ -83,6 +86,7 @@ export const messageService = {
     type?: string;
     fileUrl?: string;
     gifUrl?: string;
+    audioDurationMs?: unknown;
     ip: string;
   }) {
     const messageType = data.type || 'text';
@@ -108,6 +112,17 @@ export const messageService = {
       if (!data.fileUrl || !FILE_URL_RE.test(data.fileUrl)
         || !(await uploadService.isOwnUpload(data.fileUrl, data.authorId, 'file'))) throw new BadRequestError('Fichier invalide');
     }
+    let audioDurationMs: number | undefined;
+    if (messageType === 'audio') {
+      // 🔐 Message vocal : autorisé pour ce type de compte ET dans ce salon ; fichier envoyé par l'auteur ; durée bornée
+      const rules = await voiceMsgRules(data.authorId, { groupId: data.groupId, conversationId: data.conversationId });
+      if (!rules.allowed) throw new ForbiddenError('Les messages vocaux ne sont pas autorisés ici.');
+      if (!data.fileUrl || !AUDIO_URL_RE.test(data.fileUrl)
+        || !(await uploadService.isOwnUpload(data.fileUrl, data.authorId, 'audio'))) throw new BadRequestError('Message vocal invalide');
+      const d = Number(data.audioDurationMs);
+      if (!Number.isInteger(d) || d < 300 || d > rules.maxSeconds * 1000 + 1500) throw new BadRequestError('Durée du message vocal invalide');
+      audioDurationMs = d;
+    }
     if (messageType === 'gif') {
       // 🔐 Les GIF sont réservés aux tiers qui y ont droit (avant : un invité pouvait en envoyer par WebSocket)
       if (!TIER_LIMITS[data.tier as keyof typeof TIER_LIMITS]?.canUseGifs) {
@@ -119,7 +134,7 @@ export const messageService = {
       }
     }
     // Un champ média ne peut accompagner que le type correspondant
-    if (messageType !== 'image' && messageType !== 'file') data.fileUrl = undefined;
+    if (messageType !== 'image' && messageType !== 'file' && messageType !== 'audio') data.fileUrl = undefined;
     if (messageType !== 'gif') data.gifUrl = undefined;
 
     // Validation contenu : obligatoire sauf pour image/gif/file
@@ -132,6 +147,7 @@ export const messageService = {
     // Validation présence du média selon le type
     if (messageType === 'image' && !data.fileUrl) throw new BadRequestError('URL image manquante');
     if (messageType === 'file'  && !data.fileUrl) throw new BadRequestError('URL fichier manquante');
+    if (messageType === 'audio' && !data.fileUrl) throw new BadRequestError('Message vocal manquant');
     if (messageType === 'gif'   && !data.gifUrl)  throw new BadRequestError('URL GIF manquante');
 
     const rate = await checkRateLimit(data.authorId, data.tier);
@@ -231,6 +247,7 @@ export const messageService = {
       type: messageType,
       file_url: data.fileUrl || undefined,
       gif_url: data.gifUrl || undefined,
+      audio_duration_ms: audioDurationMs,
       ip_address: data.ip,
     });
 

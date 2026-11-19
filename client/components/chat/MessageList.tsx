@@ -191,7 +191,7 @@ export function MessageList({ messages, isLoading, hasMore, onLoadMore, onToggle
                 <div className="text-[13px] text-[var(--t2)] leading-relaxed break-words">
                   <MessageContent content={msg.content} type={msg.type}
                     file_url={msg.file_url} gif_url={msg.gif_url} link_preview={msg.link_preview}
-                    media_removed={(msg as any).media_removed} currentUsername={currentUsername} />
+                    media_removed={(msg as any).media_removed} audio_duration_ms={(msg as any).audio_duration_ms} currentUsername={currentUsername} />
                 </div>
 
                 {(msg.thread_count > 0 || isThreadOpen) && (

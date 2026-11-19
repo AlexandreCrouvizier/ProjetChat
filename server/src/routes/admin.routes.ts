@@ -393,6 +393,7 @@ adminRouter.get('/groups', async (_req, res) => {
         'groups.id', 'groups.name', 'groups.description', 'groups.type',
         'groups.status', 'groups.is_official', 'groups.member_count',
         'groups.created_at', 'groups.last_message_at', 'groups.creator_id',
+        'groups.allow_voice', 'groups.allow_video', 'groups.allow_screen', 'groups.allow_voicemsg', 'groups.voice_max_participants',
         'creator.username as creator_username'
       )
       .orderBy('groups.created_at', 'desc');
@@ -400,6 +401,58 @@ adminRouter.get('/groups', async (_req, res) => {
   } catch (error: any) {
     console.error('❌ admin groups:', error);
     res.status(500).json({ error: 'INTERNAL_ERROR', message: error.message });
+  }
+});
+
+/**
+ * PATCH /api/admin/groups/:id/voice — Dérogations voix / vidéo / écran d'un salon
+ * { allow_voice?, allow_video?, allow_screen?, allow_voicemsg?: 'on' | 'off' | null (null = suit le type de salon), voice_max_participants?: 2-100 | null }
+ * 🔐 Une dérogation « on » ne dépasse jamais le type de compte du membre (voice.service.decide).
+ */
+adminRouter.patch('/groups/:id/voice', async (req, res) => {
+  try {
+    if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(req.params.id)) {
+      return res.status(404).json({ error: 'NOT_FOUND' });
+    }
+    const group = await db('groups').where({ id: req.params.id }).first('id', 'allow_voice', 'allow_video', 'allow_screen', 'allow_voicemsg', 'voice_max_participants');
+    if (!group) return res.status(404).json({ error: 'NOT_FOUND' });
+
+    const update: Record<string, any> = {};
+    for (const col of ['allow_voice', 'allow_video', 'allow_screen', 'allow_voicemsg']) {
+      if (!(col in (req.body || {}))) continue;
+      const v = req.body[col];
+      if (v !== null && v !== 'on' && v !== 'off') return res.status(400).json({ error: 'VALIDATION_ERROR', message: `${col} : on | off | null`, field: col });
+      update[col] = v;
+    }
+    if ('voice_max_participants' in (req.body || {})) {
+      const v = req.body.voice_max_participants;
+      if (v !== null && !(Number.isInteger(v) && v >= 2 && v <= 100)) {
+        return res.status(400).json({ error: 'VALIDATION_ERROR', message: 'voice_max_participants : entier de 2 à 100 ou null', field: 'voice_max_participants' });
+      }
+      update.voice_max_participants = v;
+    }
+    if (Object.keys(update).length === 0) return res.status(400).json({ error: 'VALIDATION_ERROR', message: 'Aucune valeur fournie' });
+
+    await db('groups').where({ id: group.id }).update(update);
+    await logAudit('admin_group_voice', getIpFromRequest(req), req.user?.userId, { group_id: group.id, from: group, to: update }, req.headers['user-agent']);
+    res.json({ success: true, id: group.id, ...update });
+  } catch (error: any) {
+    console.error('❌ admin group voice:', error);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
+  }
+});
+
+/** GET /api/admin/voice/health — État de LiveKit (configuré ? répond ?) : détails réservés au panel, jamais aux membres */
+adminRouter.get('/voice/health', async (_req, res) => {
+  try {
+    const { getVoiceHealth, effectiveVoiceMode } = await import('../services/voice.service');
+    const { settingsService } = await import('../services/settings.service');
+    const h = await getVoiceHealth(true);
+    res.json({ configured: h.configured, reachable: h.ok, detail: h.detail, checked_at: new Date(h.checkedAt).toISOString(),
+      setting: await settingsService.voiceMode(), effective: await effectiveVoiceMode() });
+  } catch (error: any) {
+    console.error('❌ admin voice health:', error);
+    res.status(500).json({ error: 'INTERNAL_ERROR' });
   }
 });
 

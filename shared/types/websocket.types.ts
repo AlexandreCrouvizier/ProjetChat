@@ -57,6 +57,20 @@ export interface ServerToClientEvents {
   'moderation:banned': (data: { duration?: string; reason?: string; expires_at?: string | null; admin_message?: string }) => void;
   'moderation:muted': (data: any) => void;
   'user:tier_updated': (data: { tier: string }) => void;
+
+  // Appels en message privé : sonnerie
+  'voice:ring': (data: VoiceRingPayload) => void;
+  'voice:ring_stop': (data: { conversation_id: string }) => void;
+  'voice:ring_declined': (data: { conversation_id: string; by: { id: string; username: string } }) => void;
+  'voice:ring_cancelled': (data: { conversation_id: string; by: { id: string; username: string } }) => void;
+}
+
+export interface VoiceRingPayload {
+  conversation_id: string;
+  from: { id: string; username: string };
+  capabilities: ('voice' | 'video' | 'screen')[];
+  /** Durée de la sonnerie (secondes) */
+  expires_in: number;
 }
 
 // ===== PAYLOADS =====
@@ -67,9 +81,11 @@ export interface SendMessagePayload {
   conversation_id?: string;
   reply_to_id?: string;
   parent_message_id?: string;
-  type?: 'text' | 'image' | 'gif' | 'file';
+  type?: 'text' | 'image' | 'gif' | 'file' | 'audio';
   file_url?: string;
   gif_url?: string;
+  /** Message vocal : durée en ms */
+  audio_duration_ms?: number;
 }
 
 export interface SendDMPayload {
@@ -77,9 +93,11 @@ export interface SendDMPayload {
   content: string;
   reply_to_id?: string;
   /** Médias en message privé (mêmes contrôles serveur que dans les salons) */
-  type?: 'text' | 'image' | 'gif' | 'file';
+  type?: 'text' | 'image' | 'gif' | 'file' | 'audio';
   file_url?: string;
   gif_url?: string;
+  /** Message vocal : durée en ms */
+  audio_duration_ms?: number;
 }
 
 export interface MessageCallback {

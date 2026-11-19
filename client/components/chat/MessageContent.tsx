@@ -8,7 +8,8 @@
 
 import { useState } from 'react';
 import { LinkPreview } from './LinkPreview';
-import { safeLocalMediaUrl, safeGifUrl, thumbForImage } from '@/lib/safeUrl';
+import { safeLocalMediaUrl, safeGifUrl, thumbForImage, safeAudioUrl } from '@/lib/safeUrl';
+import { AudioMessage } from './AudioMessage';
 import { useGifAutoDisplay, useGifConfig } from '@/hooks/useGifConfig';
 
 interface LinkPreviewData {
@@ -23,6 +24,8 @@ interface MessageContentProps {
   currentUsername?: string;
   /** Média effacé après coup (par son auteur ou par la modération) */
   media_removed?: 'author' | 'moderation' | 'expired' | null;
+  /** Message vocal : durée en ms */
+  audio_duration_ms?: number | null;
 }
 
 // ─── Utilitaires ─────────────────────────────────────────────────────────────
@@ -238,8 +241,21 @@ function TextWithMentions({ content, currentUsername }: { content: string; curre
 // ─── Export principal ─────────────────────────────────────────────────────────
 
 export function MessageContent({
-  content, type = 'text', file_url, gif_url, link_preview, currentUsername, media_removed,
+  content, type = 'text', file_url, gif_url, link_preview, currentUsername, media_removed, audio_duration_ms,
 }: MessageContentProps) {
+  if (type === 'audio') {
+    if (media_removed) {
+      return (
+        <span className="inline-flex items-center gap-1.5 mt-1 px-2.5 py-1.5 rounded-lg text-[11px] italic text-[var(--t3)] border border-dashed border-[var(--border)]">
+          {media_removed === 'moderation' ? '🛡️ Message vocal retiré par la modération'
+            : media_removed === 'expired' ? '⌛ Message vocal expiré (durée de conservation dépassée)'
+            : '🗑️ Message vocal supprimé par son auteur'}
+        </span>
+      );
+    }
+    const src = safeAudioUrl(file_url);
+    return src ? <AudioMessage src={src} durationMs={audio_duration_ms ?? null} /> : <span className="text-[11px] italic text-[var(--t3)]">🎤 Message vocal indisponible</span>;
+  }
   // Image / fichier effacé après coup : le texte reste, le média est remplacé par une mention
   if (media_removed && (type === 'image' || type === 'file')) {
     const what = type === 'image' ? 'Image' : 'Fichier';

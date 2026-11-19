@@ -167,10 +167,11 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
 
   // ⭐ sendMediaMessage : envoie un message de type image, gif ou file
   const sendMediaMessage = useCallback(async (params: {
-    type: 'image' | 'gif' | 'file';
+    type: 'image' | 'gif' | 'file' | 'audio';
     file_url?: string;
     gif_url?: string;
     content?: string;
+    audio_duration_ms?: number;
   }) => {
     const socket = getSocket();
     if (!socket || !groupId) return;
@@ -181,6 +182,7 @@ export function useChat(groupId: string | null, currentUserId: string | null) {
         type: params.type,
         file_url: params.file_url,
         gif_url: params.gif_url,
+        audio_duration_ms: params.audio_duration_ms,
       }, (response: any) => {
         if (response.success) resolve(response.message);
         else {

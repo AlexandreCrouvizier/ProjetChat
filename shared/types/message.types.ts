@@ -1,6 +1,6 @@
 // ===== MESSAGE TYPES =====
 
-export type MessageType = 'text' | 'image' | 'file' | 'gif' | 'system';
+export type MessageType = 'text' | 'image' | 'file' | 'gif' | 'system' | 'audio';
 
 export interface Message {
   id: string;
@@ -22,6 +22,8 @@ export interface Message {
   /** Média effacé après coup : « author » (par son auteur) ou « moderation » */
   media_removed?: 'author' | 'moderation' | 'expired' | null;
   gif_url: string | null;
+  /** Message vocal : durée en millisecondes */
+  audio_duration_ms?: number | null;
   link_preview: LinkPreview | null;
   is_ephemeral: boolean;
   is_pinned: boolean;
